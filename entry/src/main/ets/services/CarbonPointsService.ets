@@ -8,34 +8,55 @@
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 
+/** 本机积分快照：同时作为持久化结构与服务层返回值 */
 export interface PointsSnapshot {
+  /** 当前可用积分余额 */
   balance: number;
+  /** 累计获得积分（签到 + 核验记录，不扣除兑换） */
   totalEarned: number;
+  /** 累计兑换消耗的积分 */
   totalRedeemed: number;
+  /** 已领取的任务键列表（如每日签到 check-in-日期） */
   claimedTaskKeys: string[];
+  /** 已入账的核验记录 operationId 列表，用于防重复计分 */
   rewardedOperationIds: string[];
+  /** 已兑换的模拟权益 id 列表 */
   redeemedRewardIds: string[];
+  /** 核验记录计分所属日期（yyyy-MM-dd），跨天自动重置 */
   recordDay: string;
+  /** 当日核验记录已入账积分，配合每日上限使用 */
   recordDayPoints: number;
 }
 
+/** 签到/入账/兑换操作的统一结果 */
 export interface PointsActionResult {
+  /** 操作是否成功 */
   success: boolean;
+  /** 本次变动的积分（失败为 0） */
   points: number;
+  /** 操作后的最新余额 */
   balance: number;
+  /** 面向用户的提示文案 */
   message: string;
 }
 
+/** 可兑换的模拟权益定义 */
 export interface PointsReward {
+  /** 权益唯一标识，兑换去重依据 */
   id: string;
+  /** 权益名称 */
   title: string;
+  /** 权益说明文案 */
   description: string;
+  /** 兑换所需积分 */
   cost: number;
 }
 
+/** 反序列化时的宽松类型：字段合法性由 normalize 统一兜底 */
 interface StoredPoints extends PointsSnapshot {
 }
 
+/** 首次使用或数据损坏时的空白积分快照 */
 const EMPTY_POINTS: PointsSnapshot = {
   balance: 0,
   totalEarned: 0,
@@ -48,11 +69,16 @@ const EMPTY_POINTS: PointsSnapshot = {
 };
 
 export class CarbonPointsService {
+  /** Preferences 存储库名 */
   private static readonly STORE_NAME: string = 'tanji_carbon_points_v1';
+  /** 快照在存储库中的键名 */
   private static readonly STATE_KEY: string = 'points_state';
+  /** 核验记录每日入账积分上限 */
   private static readonly DAILY_RECORD_LIMIT: number = 30;
+  /** 每条核验记录的基础积分 */
   private static readonly VERIFIED_RECORD_POINTS: number = 10;
 
+  /** 生成本地日期键（yyyy-MM-dd），用于签到去重与每日上限跨天重置 */
   private today(): string {
     const date: Date = new Date();
     const month: string = (date.getMonth() + 1).toString().padStart(2, '0');
@@ -60,10 +86,20 @@ export class CarbonPointsService {
     return `${date.getFullYear()}-${month}-${day}`;
   }
 
+  /**
+   * 打开积分专用的 Preferences 存储库
+   * @param context 应用上下文
+   */
   private async openStore(context: common.Context): Promise<preferences.Preferences> {
     return preferences.getPreferences(context, { name: CarbonPointsService.STORE_NAME });
   }
 
+  /**
+   * 清洗快照数据：数值夹取非负、数组兜底为空、字符串校验类型，
+   * 防止历史数据或异常 JSON 破坏积分不变量。
+   * @param value 待清洗的快照
+   * @returns 字段合法的快照
+   */
   private normalize(value: PointsSnapshot): PointsSnapshot {
     return {
       balance: Math.max(0, Number(value.balance) || 0),
@@ -77,6 +113,10 @@ export class CarbonPointsService {
     };
   }
 
+  /**
+   * 读取积分快照；无数据或 JSON 解析失败时返回空白快照
+   * @param context 应用上下文
+   */
   async load(context: common.Context): Promise<PointsSnapshot> {
     const store: preferences.Preferences = await this.openStore(context);
     const value: preferences.ValueType = await store.get(CarbonPointsService.STATE_KEY, '');
@@ -90,12 +130,18 @@ export class CarbonPointsService {
     }
   }
 
+  /**
+   * 清洗并持久化积分快照后立即落盘
+   * @param context 应用上下文
+   * @param snapshot 待保存的快照
+   */
   private async save(context: common.Context, snapshot: PointsSnapshot): Promise<void> {
     const store: preferences.Preferences = await this.openStore(context);
     await store.put(CarbonPointsService.STATE_KEY, JSON.stringify(this.normalize(snapshot)));
     await store.flush();
   }
 
+  /** 组装操作结果的快捷方法，保证各分支返回结构一致 */
   private result(success: boolean, points: number, balance: number, message: string): PointsActionResult {
     return { success: success, points: points, balance: balance, message: message };
   }

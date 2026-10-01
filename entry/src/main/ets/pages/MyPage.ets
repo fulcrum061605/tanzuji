@@ -44,17 +44,24 @@ export struct MyPage {
   @State private loading: boolean = true;
   /** 当前按下的底部栏目，用于与主页保持一致的轻微按压反馈。 */
   @State private pressedTab: string = '';
-  /** 本机积分快照；积分服务负责持久化和防刷上限。 */
+  /** 当前可用碳积分余额 */
   @State private points: number = 0;
+  /** 累计获得积分（含已兑换消耗的部分） */
   @State private totalEarnedPoints: number = 0;
+  /** 今日是否已签到：由积分快照中的签到任务键推算 */
   @State private claimedCheckIn: boolean = false;
+  /** 已兑换（已领取）的模拟权益 id 列表 */
   @State private redeemedRewardIds: string[] = [];
+  /** 签到请求进行中标记：防止重复点击 */
   @State private checkingIn: boolean = false;
+  /** 正在兑换的权益 id：空串表示没有进行中的兑换 */
   @State private redeemingRewardId: string = '';
   /** 知识服务实例：负责文章加载与收藏持久化 */
   private service: KnowledgeService = new KnowledgeService();
+  /** 本地积分服务：负责签到、核验入账与权益兑换的持久化 */
   private pointsService: CarbonPointsService = new CarbonPointsService();
 
+  /** 可兑换的模拟权益清单：仅用于演示，兑换结果只保存在本机 */
   private readonly rewardItems: PointsReward[] = [
     { id: 'green-badge', title: '校园绿能徽章', description: '虚拟徽章，兑换后展示在碳记权益记录中', cost: 30 },
     { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
@@ -74,6 +81,10 @@ export struct MyPage {
     this.loadPoints();
   }
 
+  /**
+   * 读取本机积分快照并刷新页面状态
+   * 余额、累计积分、今日签到态与已兑换权益一次性同步；读取失败时提示
+   */
   private async loadPoints(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -87,11 +98,16 @@ export struct MyPage {
     }
   }
 
+  /** 生成本地日期键（yyyy-MM-dd），与积分服务的签到任务键保持一致 */
   private todayKey(): string {
     const date: Date = new Date();
     return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
   }
 
+  /**
+   * 每日签到：领取固定 5 积分
+   * 签到中或已签到时直接返回；结果与失败场景均以 Toast 提示
+   */
   private async checkIn(): Promise<void> {
     if (this.checkingIn || this.claimedCheckIn) {
       return;
@@ -109,6 +125,10 @@ export struct MyPage {
     }
   }
 
+  /**
+   * 兑换模拟权益：扣除对应积分并记录权益 id
+   * @param reward 待兑换的权益项
+   */
   private async redeemReward(reward: PointsReward): Promise<void> {
     if (this.redeemingRewardId !== '' || this.redeemedRewardIds.includes(reward.id) || this.points < reward.cost) {
       return;
@@ -372,6 +392,7 @@ export struct MyPage {
     .margin({ left: 22, right: 22, bottom: 18 })
   }
 
+  /** 每日签到卡片：左侧勾选图标 + 任务说明 + 右侧签到按钮（已签到时置灰） */
   @Builder
   private TaskCard() {
     Row({ space: 12 }) {
@@ -413,10 +434,20 @@ export struct MyPage {
     .margin({ left: 22, right: 22, bottom: 18 })
   }
 
+  /**
+   * 判断指定权益是否已兑换
+   * @param reward 权益项
+   * @returns true 表示已领取过
+   */
   private rewardClaimed(reward: PointsReward): boolean {
     return this.redeemedRewardIds.includes(reward.id);
   }
 
+  /**
+   * 单条模拟权益行：图标 + 标题/说明/所需积分 + 右侧兑换按钮
+   * 余额不足或已领取时按钮置灰；兑换中显示"兑换中…"
+   * @param reward 权益数据
+   */
   @Builder
   private RewardRow(reward: PointsReward) {
     Row({ space: 12 }) {
@@ -462,6 +493,10 @@ export struct MyPage {
     .borderRadius(14)
   }
 
+  /**
+   * 积分与权益中心视图
+   * 顶部标题行（返回） + 滚动区：积分卡片、签到卡片、可兑换权益列表与累计说明
+   */
   @Builder
   private RewardsCenter() {
     Column() {
