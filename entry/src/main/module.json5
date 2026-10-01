@@ -1,0 +1,103 @@
+/**
+ * entry 模块清单文件
+ * 声明模块基本信息、支持的设备类型、页面路由表、UIAbility 与扩展 Ability，
+ * 由系统在应用安装与启动时读取
+ */
+{
+  "module": {
+    // 模块名称：与工程目录名保持一致
+    "name": "entry",
+    // 模块类型：entry 表示应用主模块（应用入口）
+    "type": "entry",
+    // 模块功能描述（引用 element/string.json 中的 module_desc 资源）
+    "description": "$string:module_desc",
+    // 模块入口 Ability：应用启动时优先拉起的 UIAbility
+    "mainElement": "EntryAbility",
+    // 支持的设备类型：手机与平板
+    "deviceTypes": [
+      "phone",
+      "tablet"
+    ],
+    // 是否随应用安装包一起下发（HAP 必须随包安装）
+    "deliveryWithInstall": true,
+    // 是否支持免安装（原子化服务）：当前为普通应用，不支持
+    "installationFree": false,
+    // 页面路由表：指向 profile/main_pages.json，注册所有 @Entry 页面
+    "pages": "$profile:main_pages",
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:location_permission_reason",
+        "usedScene": {
+          "when": "inuse"
+        }
+      },
+      {
+        "name": "ohos.permission.ACTIVITY_MOTION",
+        "reason": "$string:motion_permission_reason",
+        "usedScene": {
+          "when": "inuse"
+        }
+      }
+    ],
+    // UIAbility 列表（带界面的应用组件）
+    "abilities": [
+      {
+        // Ability 名称
+        "name": "EntryAbility",
+        // Ability 实现文件路径
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        // Ability 描述（引用资源）
+        "description": "$string:EntryAbility_desc",
+        // 桌面图标：分层图标资源
+        "icon": "$media:layered_image",
+        // 桌面显示名称（引用资源）
+        "label": "$string:EntryAbility_label",
+        // 启动页图标
+        "startWindowIcon": "$media:startIcon",
+        // 启动页背景色（引用 element/color.json 资源）
+        "startWindowBackground": "$color:start_window_background",
+        // 是否可被外部应用隐式拉起
+        "exported": true,
+        // 意图过滤：声明为桌面入口（点击桌面图标拉起本应用）
+        "skills": [
+          {
+            "entities": [
+              "entity.system.home"
+            ],
+            "actions": [
+              "ohos.want.action.home"
+            ]
+          }
+        ]
+      }
+    ],
+    // 扩展 Ability 列表（无界面，由系统按场景自动调用）
+    "extensionAbilities": [
+      {
+        // 备份扩展 Ability 名称
+        "name": "EntryBackupAbility",
+        // 实现文件路径
+        "srcEntry": "./ets/entrybackupability/EntryBackupAbility.ets",
+        // 扩展类型：数据备份/恢复
+        "type": "backup",
+        // 不允许外部应用显式拉起
+        "exported": false,
+        // 备份框架元数据：指向备份策略配置文件
+        "metadata": [
+          {
+            "name": "ohos.extension.backup",
+            "resource": "$profile:backup_config"
+          }
+        ],
+      }
+    ]
+  }
+}

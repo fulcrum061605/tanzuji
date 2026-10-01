@@ -1,0 +1,20 @@
+/**
+ * entry 模块级包管理配置
+ * 声明模块包名、版本与依赖信息，由 ohpm 包管理器读取
+ */
+{
+  // 模块包名称
+  "name": "entry",
+  // 模块版本
+  "version": "1.0.0",
+  // 模块描述（模板占位文本，发布时可完善）
+  "description": "Please describe the basic information.",
+  // 包入口文件（HAP 模块无需指定）
+  "main": "",
+  // 作者信息（模板占位，发布时可完善）
+  "author": "",
+  // 开源协议（模板占位，发布时可完善）
+  "license": "",
+  // 运行时依赖：当前未使用三方库
+  "dependencies": {}
+}

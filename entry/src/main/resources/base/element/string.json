@@ -1,0 +1,28 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "module description"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "description"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "label"
+    },
+    {
+      "name": "location_permission_reason",
+      "value": "用于测量步行或骑行轨迹，计算真实低碳距离"
+    },
+    {
+      "name": "motion_permission_reason",
+      "value": "用于确认用户正在进行步行或骑行活动"
+    },
+    {
+      "name": "health_permission_reason",
+      "value": "用于读取华为运动中的步数和运动时长，避免手动刷分"
+    }
+  ]
+}

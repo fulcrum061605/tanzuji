@@ -1,0 +1,80 @@
+/**
+ * 工程级构建配置
+ * 声明签名材料、产品定义、构建模式与参与编译的模块列表，
+ * 由 hvigor 构建系统读取
+ */
+{
+  "app": {
+    // 签名配置：调试证书由 DevEco Studio 自动生成（发布时需替换为正式签名材料）
+    "signingConfigs": [
+      {
+        // 签名配置名称：供下方 products 引用
+        "name": "default",
+        // 签名类型：HarmonyOS 应用签名
+        "type": "HarmonyOS",
+        // 签名材料：证书、密钥与密码等（本机自动生成的调试材料，勿提交版本库）
+        "material": {
+          "certpath": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001A9029F52C91A084613C7C1E5B45058F8BB846156F0D77C706A622EA36A2F6C8B72B8C939EBF1B",
+          "profile": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.p12",
+          "storePassword": "0000001A429CC4EFAF5423133EEB88C8BFF7A25E9C25A79EDF1C9BEB654479F1EB80E8AF1DC6AC330FB2"
+        }
+      }
+    ],
+    // 产品定义：不同产品可配置不同的 SDK 版本与构建选项
+    "products": [
+      {
+        // 产品名称
+        "name": "default",
+        // 引用的签名配置
+        "signingConfig": "default",
+        // 目标 SDK 版本（编译用的 API 版本）
+        "targetSdkVersion": "26.0.0",
+        // 兼容的最低 SDK 版本（低于该版本的系统无法安装）
+        "compatibleSdkVersion": "6.1.1(24)",
+        // 运行时操作系统
+        "runtimeOS": "HarmonyOS",
+        // 构建选项
+        "buildOption": {
+          // 严格模式：资源大小写敏感检查 + 规范化模块 URL
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    // 构建模式集合：debug（可调试）/ release（面向发布）
+    "buildModeSet": [
+      {
+        // 调试模式：不混淆、支持断点调试
+        "name": "debug",
+      },
+      {
+        // 发布模式：面向上架发布
+        "name": "release"
+      }
+    ]
+  },
+  // 参与编译的模块列表
+  "modules": [
+    {
+      // 模块名称
+      "name": "entry",
+      // 模块所在目录
+      "srcPath": "./entry",
+      // 模块构建目标：default 目标应用于 default 产品
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

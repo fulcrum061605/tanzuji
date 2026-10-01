@@ -1,0 +1,20 @@
+/**
+ * 工程级包管理配置（类比 npm 的 package.json）
+ * 声明工程级依赖与开发依赖，由 ohpm 包管理器读取
+ */
+{
+  // 包管理模型版本
+  "modelVersion": "26.0.0",
+  // 工程描述
+  "description": "Please describe the basic information.",
+  // 运行时依赖：当前未使用三方库
+  "dependencies": {
+  },
+  // 开发依赖：仅在开发/测试阶段使用
+  "devDependencies": {
+    // 轻量级单元测试框架
+    "@ohos/hypium": "1.0.25",
+    // Mock 模拟框架（配合 ohosTest 仪器测试使用）
+    "@ohos/hamock": "1.0.0"
+  }
+}

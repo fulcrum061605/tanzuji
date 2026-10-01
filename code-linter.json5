@@ -1,0 +1,41 @@
+/**
+ * 代码检查（Code Linter）配置
+ * 声明静态检查的文件范围、忽略目录、规则集与自定义规则，
+ * 由 DevEco Studio 的代码检查工具读取
+ */
+{
+  // 参与检查的文件范围：所有 .ets 源文件
+  "files": [
+    "**/*.ets"
+  ],
+  // 忽略检查的目录：测试、模拟、依赖与构建产物
+  "ignore": [
+    "**/src/ohosTest/**/*",  // 设备仪器测试
+    "**/src/test/**/*",      // 本地单元测试
+    "**/src/mock/**/*",      // Mock 模拟数据
+    "**/node_modules/**/*",  // npm 依赖
+    "**/oh_modules/**/*",    // ohpm 依赖
+    "**/build/**/*",         // 构建产物
+    "**/.preview/**/*"       // 预览器缓存
+  ],
+  // 规则集：性能推荐规则 + TypeScript ESLint 推荐规则
+  "ruleSet": [
+    "plugin:@performance/recommended",
+    "plugin:@typescript-eslint/recommended"
+  ],
+  // 自定义规则：安全类加密算法检查，禁用已知不安全的加密实现
+  "rules": {
+    "@security/no-unsafe-aes": "error",         // 禁止不安全的 AES 用法
+    "@security/no-unsafe-hash": "error",        // 禁止不安全的哈希算法（如 MD5/SHA1）
+    "@security/no-unsafe-mac": "warn",          // 警告不安全的 MAC 用法
+    "@security/no-unsafe-dh": "error",          // 禁止不安全的 DH 密钥交换
+    "@security/no-unsafe-dsa": "error",         // 禁止不安全的 DSA 签名
+    "@security/no-unsafe-ecdsa": "error",       // 禁止不安全的 ECDSA 曲线
+    "@security/no-unsafe-rsa-encrypt": "error", // 禁止不安全的 RSA 加密
+    "@security/no-unsafe-rsa-sign": "error",    // 禁止不安全的 RSA 签名
+    "@security/no-unsafe-rsa-key": "error",     // 禁止不安全的 RSA 密钥长度
+    "@security/no-unsafe-dsa-key": "error",     // 禁止不安全的 DSA 密钥长度
+    "@security/no-unsafe-dh-key": "error",      // 禁止不安全的 DH 密钥长度
+    "@security/no-unsafe-3des": "error"         // 禁止 3DES 算法
+  }
+}

@@ -1,0 +1,23 @@
+/**
+ * 应用级配置文件（AppScope）
+ * 声明应用的全局基础信息：包名、厂商、版本号与全局图标/名称资源，
+ * 打包时合并进最终应用产物
+ */
+{
+  "app": {
+    // 应用包名：系统内唯一标识（上架后不可更改）
+    "bundleName": "com.example.tanzuji",
+    // 应用厂商名称
+    "vendor": "example",
+    // 版本号：仅用于系统内部比较大小，用户不可见
+    "versionCode": 1000000,
+    // 版本名称：展示给用户的版本号
+    "versionName": "1.0.0",
+    // 构建版本号
+    "buildVersion": "1",
+    // 应用全局图标（分层图标资源）
+    "icon": "$media:layered_image",
+    // 应用全局名称（引用 element/string.json 中的 app_name 资源）
+    "label": "$string:app_name"
+  }
+}
