@@ -121,11 +121,15 @@ export struct Home {
   @State private plusPressed: boolean = false;
   /** 宽屏布局标记：平板限制日记内容宽度，手机保持原来的满宽布局。 */
   @State private wideLayout: boolean = false;
+  /** 搜索框是否展开：true 时在顶部区域下方显示搜索输入行 */
   @State private searchActive: boolean = false;
+  /** 搜索关键字：对日记时间/标题/正文/标签做包含匹配 */
   @State private searchText: string = '';
 
+  /** 组件即将出现：恢复入口传入的选中栏目，并按媒体查询结果判断宽屏布局 */
   aboutToAppear(): void {
     this.selectedTab = this.initialTab;
+    // 平板/横向大窗口（宽度 ≥600vp）使用宽屏布局
     this.wideLayout = this.getUIContext().getMediaQuery()
       .matchMediaSync('(width >= 600vp)').matches;
   }
@@ -192,11 +196,20 @@ export struct Home {
     return this.combinedEntries().length;
   }
 
+  /**
+   * 获取过滤后的日记列表
+   * 先合并"已保存草稿（倒序，最新在前） + 未删除的内置示例"，
+   * 再按关键字对时间/标题/正文/标签做包含匹配
+   * @returns 符合搜索条件的日记条目数组
+   */
   private filteredEntries(): DiaryEntry[] {
+    // 去除关键字首尾空白与内部空格，避免误过滤
     const keyword: string = this.searchText.trim().toLowerCase().replace(/\s/g, '');
+    // 关键字为空：返回合并后的全量列表
     if (keyword.length === 0) {
       return this.combinedEntries();
     }
+    // 按可检索字段（时间+标题+正文+标签）做包含匹配
     return this.combinedEntries().filter((entry: DiaryEntry): boolean => {
       const searchable: string = `${entry.time}${entry.title}${entry.content}${entry.label}`
         .toLowerCase().replace(/\s/g, '');
@@ -204,6 +217,11 @@ export struct Home {
     });
   }
 
+  /**
+   * 汇总今日估算减排量
+   * 只统计允许计分（scoreEnabled）的记录，保留 2 位小数
+   * @returns 减排总量展示文本
+   */
   private reductionTotal(): string {
     let total: number = 0;
     this.combinedEntries().forEach((entry: DiaryEntry) => {
@@ -394,12 +412,15 @@ export struct Home {
     .width('100%')
     .margin({ top: 4, bottom: 12 })
 
+    // 搜索行：点击搜索按钮后展开，关键字实时过滤下方列表
     if (this.searchActive) {
       Row({ space: 8 }) {
+        // 搜索图标
         Image($r('app.media.diary_search'))
           .syncLoad(true)
           .width(22)
           .height(22)
+        // 关键字输入框：内容变化实时刷新列表
         TextInput({ placeholder: '搜索标题、正文或低碳行为', text: this.searchText })
           .layoutWeight(1)
           .height(44)
@@ -411,6 +432,7 @@ export struct Home {
           .onChange((value: string): void => {
             this.searchText = value;
           })
+        // 清除按钮：清空关键字并收起搜索行
         Button('清除', { type: ButtonType.Normal, stateEffect: false })
           .fontSize(13)
           .fontColor('#4C8067')

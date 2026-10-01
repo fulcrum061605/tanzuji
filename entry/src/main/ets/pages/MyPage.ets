@@ -7,6 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
+import { CarbonPointsService, PointsReward, PointsSnapshot } from '../services/CarbonPointsService';
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -35,14 +36,30 @@ export struct MyPage {
   @State private favoriteIds: string[] = [];
   /** 是否显示"我的收藏"列表视图 */
   @State private showingFavorites: boolean = false;
+  /** 是否显示积分与模拟权益中心 */
+  @State private showingRewards: boolean = false;
   /** 当前打开的收藏文章 id：非空时进入文章详情视图 */
   @State private openedArticleId: string = '';
   /** 内容加载中标记 */
   @State private loading: boolean = true;
   /** 当前按下的底部栏目，用于与主页保持一致的轻微按压反馈。 */
   @State private pressedTab: string = '';
+  /** 本机积分快照；积分服务负责持久化和防刷上限。 */
+  @State private points: number = 0;
+  @State private totalEarnedPoints: number = 0;
+  @State private claimedCheckIn: boolean = false;
+  @State private redeemedRewardIds: string[] = [];
+  @State private checkingIn: boolean = false;
+  @State private redeemingRewardId: string = '';
   /** 知识服务实例：负责文章加载与收藏持久化 */
   private service: KnowledgeService = new KnowledgeService();
+  private pointsService: CarbonPointsService = new CarbonPointsService();
+
+  private readonly rewardItems: PointsReward[] = [
+    { id: 'green-badge', title: '校园绿能徽章', description: '虚拟徽章，兑换后展示在碳记权益记录中', cost: 30 },
+    { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
+    { id: 'travel-coupon', title: '低碳出行优惠券', description: '模拟权益码：GREEN-TRAVEL-2026', cost: 120 }
+  ];
   /** 底部导航条的液态玻璃材质：薄样式 + 低不透明度淡绿赋色；不具备能力的设备为 undefined */
   private navBarMaterial: uiMaterial.Material | undefined = isGlassCapable()
     ? new uiMaterial.ImmersiveMaterial({
@@ -54,6 +71,59 @@ export struct MyPage {
   /** 组件即将出现：加载文章与收藏列表 */
   aboutToAppear(): void {
     this.loadFavorites();
+    this.loadPoints();
+  }
+
+  private async loadPoints(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const snapshot: PointsSnapshot = await this.pointsService.load(context);
+      this.points = snapshot.balance;
+      this.totalEarnedPoints = snapshot.totalEarned;
+      this.claimedCheckIn = snapshot.claimedTaskKeys.includes(`check-in-${this.todayKey()}`);
+      this.redeemedRewardIds = snapshot.redeemedRewardIds;
+    } catch (error) {
+      this.showToast('积分数据暂时无法读取');
+    }
+  }
+
+  private todayKey(): string {
+    const date: Date = new Date();
+    return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+  }
+
+  private async checkIn(): Promise<void> {
+    if (this.checkingIn || this.claimedCheckIn) {
+      return;
+    }
+    this.checkingIn = true;
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const result = await this.pointsService.checkIn(context);
+      this.showToast(result.message);
+      await this.loadPoints();
+    } catch (error) {
+      this.showToast('签到暂时不可用');
+    } finally {
+      this.checkingIn = false;
+    }
+  }
+
+  private async redeemReward(reward: PointsReward): Promise<void> {
+    if (this.redeemingRewardId !== '' || this.redeemedRewardIds.includes(reward.id) || this.points < reward.cost) {
+      return;
+    }
+    this.redeemingRewardId = reward.id;
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const result = await this.pointsService.redeem(context, reward);
+      this.showToast(result.message);
+      await this.loadPoints();
+    } catch (error) {
+      this.showToast('兑换暂时不可用');
+    } finally {
+      this.redeemingRewardId = '';
+    }
   }
 
   /**
@@ -254,6 +324,207 @@ export struct MyPage {
     .backgroundColor('#EAF3E7')
     .borderRadius(16)
     .margin({ left: 22, right: 22, bottom: 24 })
+  }
+
+  /** 积分入口卡片：余额醒目，但明确展示积分来源和每日上限。 */
+  @Builder
+  private PointsCard() {
+    Column({ space: 12 }) {
+      Row() {
+        Column({ space: 3 }) {
+          Text(`${this.points}`)
+            .fontSize(30)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#174E3A')
+          Text('可用碳积分')
+            .fontSize(13)
+            .fontColor('#5E776A')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        Button('兑换权益', { type: ButtonType.Capsule, stateEffect: true })
+          .height(38)
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+          .backgroundColor('#4C9576')
+          .onClick((): void => {
+            this.showingRewards = true;
+          })
+      }
+      Row({ space: 8 }) {
+        Image($r('app.media.diary_leaf'))
+          .syncLoad(true)
+          .width(18)
+          .height(18)
+        Text('核验记录每条 +10，每日最多 3 条；手动待核实记录不计分')
+          .fontSize(12)
+          .fontColor('#718078')
+          .maxLines(2)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+    }
+    .width('100%')
+    .padding({ left: 18, right: 18, top: 16, bottom: 15 })
+    .backgroundColor('#E7F2E7')
+    .border({ width: 1, color: '#CFE3D0' })
+    .borderRadius(16)
+    .margin({ left: 22, right: 22, bottom: 18 })
+  }
+
+  @Builder
+  private TaskCard() {
+    Row({ space: 12 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row()
+          .width(40)
+          .height(40)
+          .borderRadius(20)
+          .backgroundColor('#EAF0E5')
+        Text('✓')
+          .fontSize(21)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#4C9576')
+      }
+      Column({ space: 4 }) {
+        Text('每日签到')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#173F2E')
+        Text('每天一次，领取 5 积分')
+          .fontSize(12)
+          .fontColor('#78867D')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Button(this.checkingIn ? '签到中…' : (this.claimedCheckIn ? '已签到' : '签到 +5'), { type: ButtonType.Capsule, stateEffect: true })
+        .height(34)
+        .fontSize(13)
+        .fontColor(this.claimedCheckIn ? '#6B8176' : '#FFFFFF')
+        .backgroundColor(this.claimedCheckIn ? '#DDE9DF' : '#4C9576')
+        .enabled(!this.claimedCheckIn && !this.checkingIn)
+        .onClick((): void => { this.checkIn(); })
+    }
+    .width('100%')
+    .padding({ left: 18, right: 18, top: 13, bottom: 13 })
+    .backgroundColor('#FAFBF6')
+    .border({ width: 1, color: '#E1E9DF' })
+    .borderRadius(14)
+    .margin({ left: 22, right: 22, bottom: 18 })
+  }
+
+  private rewardClaimed(reward: PointsReward): boolean {
+    return this.redeemedRewardIds.includes(reward.id);
+  }
+
+  @Builder
+  private RewardRow(reward: PointsReward) {
+    Row({ space: 12 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row()
+          .width(46)
+          .height(46)
+          .borderRadius(23)
+          .backgroundColor(this.rewardClaimed(reward) ? '#E2E9E3' : '#E6F1E4')
+        Image(reward.id === 'tree-certificate' ? $r('app.media.diary_sprout')
+          : reward.id === 'travel-coupon' ? $r('app.media.diary_transit') : $r('app.media.diary_leaf'))
+          .syncLoad(true)
+          .width(28)
+          .height(28)
+      }
+      Column({ space: 4 }) {
+        Text(reward.title)
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#173F2E')
+        Text(reward.description)
+          .fontSize(12)
+          .fontColor('#78867D')
+          .maxLines(2)
+        Text(`${reward.cost} 积分`)
+          .fontSize(12)
+          .fontColor('#4C8067')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      Button(this.redeemingRewardId === reward.id ? '兑换中…' : (this.rewardClaimed(reward) ? '已领取' : '兑换'), { type: ButtonType.Capsule, stateEffect: true })
+        .height(34)
+        .fontSize(13)
+        .fontColor(this.rewardClaimed(reward) || this.points < reward.cost ? '#8B968E' : '#FFFFFF')
+        .backgroundColor(this.rewardClaimed(reward) || this.points < reward.cost ? '#E2EAE3' : '#4C9576')
+        .enabled(this.redeemingRewardId === '' && !this.rewardClaimed(reward) && this.points >= reward.cost)
+        .onClick((): void => { this.redeemReward(reward); })
+    }
+    .width('100%')
+    .padding({ left: 16, right: 16, top: 14, bottom: 14 })
+    .backgroundColor('#FAFBF6')
+    .border({ width: 1, color: '#E1E9DF' })
+    .borderRadius(14)
+  }
+
+  @Builder
+  private RewardsCenter() {
+    Column() {
+      Row() {
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text('‹')
+            .fontSize(40)
+            .fontColor('#174E3A')
+        }
+        .width(44)
+        .height(48)
+        .padding(0)
+        .backgroundColor(Color.Transparent)
+        .accessibilityText('返回我的')
+        .onClick((): void => { this.showingRewards = false; })
+        Text('积分与权益')
+          .fontSize(22)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#123F2E')
+          .layoutWeight(1)
+          .textAlign(TextAlign.Center)
+        Blank().width(44)
+      }
+      .width('100%')
+      .height(60)
+      .padding({ left: 14, right: 14 })
+
+      Scroll() {
+        Column() {
+          this.PointsCard()
+          this.TaskCard()
+          Column({ space: 6 }) {
+            Text('兑换模拟权益')
+              .fontSize(18)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#173F2E')
+            Text('权益仅用于比赛演示，兑换结果保存在本机，不连接真实平台。')
+              .fontSize(12)
+              .fontColor('#78867D')
+              .width('100%')
+          }
+          .width('100%')
+          .alignItems(HorizontalAlign.Start)
+          .padding({ left: 22, right: 22, bottom: 12 })
+          ForEach(this.rewardItems, (reward: PointsReward) => {
+            this.RewardRow(reward)
+          }, (reward: PointsReward): string => reward.id)
+          Text(`累计获得 ${this.totalEarnedPoints} 积分 · 核验记录每日上限 30 分`)
+            .fontSize(12)
+            .fontColor('#8A968F')
+            .width('100%')
+            .textAlign(TextAlign.Center)
+            .padding({ top: 12, bottom: 26 })
+        }
+        .width('100%')
+      }
+      .width('100%')
+      .layoutWeight(1)
+      .scrollBar(BarState.Off)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('#F7F8F2')
   }
 
   /**
@@ -647,6 +918,9 @@ export struct MyPage {
     // 打开了收藏文章：整页切换为文章详情
     if (this.openedArticle() !== undefined) {
       this.ArticleDetail(this.openedArticle() as KnowledgeArticle)
+    } else if (this.showingRewards) {
+      // 积分中心作为“我的”页内子页面打开，返回后保留当前余额和收藏状态。
+      this.RewardsCenter()
     } else if (this.showingFavorites) {
       // 收藏列表视图
       this.FavoriteList()
@@ -658,9 +932,15 @@ export struct MyPage {
             this.Header()
             this.Profile()
             this.Overview()
+            // 积分入口保持在个人概览之后，方便查看余额；完整签到和兑换流程在子页面中展开。
+            this.PointsCard()
             // 菜单入口：我的收藏（显示收藏数量）
             this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.diary_leaf'), () => {
               this.showingFavorites = true;
+            })
+            // 菜单入口：积分与权益（模拟兑换，不连接真实平台）
+            this.MenuRow('积分与权益', '签到、查看积分并兑换模拟低碳权益', $r('app.media.diary_leaf'), () => {
+              this.showingRewards = true;
             })
             // 菜单入口：成长知识库（切换到成长栏目）
             this.MenuRow('成长知识库', '双碳基础与校园低碳实践', $r('app.media.diary_sprout'), () => {

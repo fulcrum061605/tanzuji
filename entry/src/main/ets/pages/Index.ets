@@ -6,6 +6,7 @@
  * - 已登录：渲染日记首页 Home 组件
  * 页面切换由组件回调驱动（而非系统路由跳转），状态流转简单直观
  */
+import { common } from '@kit.AbilityKit';
 import { Login } from './Login';
 import { Home } from './Home';
 import { BehaviorPicker } from './BehaviorPicker';
@@ -18,6 +19,7 @@ import { PreviewAuthService } from '../services/PreviewAuthService';
 import { MyPage } from './MyPage';
 import { FootprintPage } from './FootprintPage';
 import { KnowledgeCenter } from './KnowledgeCenter';
+import { CarbonPointsService } from '../services/CarbonPointsService';
 
 /**
  * 入口组件
@@ -51,15 +53,40 @@ struct Index {
   @State private activeTab: string = '日记';
   /** 已从首页删除的示例记录，避免静态样例再次出现。 */
   @State private hiddenPreviewIds: string[] = [];
+  /** 本地积分服务：真实保存的核验记录才会入账，示例数据不会自动产生积分。 */
+  private pointsService: CarbonPointsService = new CarbonPointsService();
 
+  /** 保存成功后为核验记录入账，去重和每日上限由服务层统一执行。 */
+  private async rewardSavedRecord(draft: RecordDraft): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      await this.pointsService.rewardVerifiedRecord(context, draft.operationId ?? '',
+        draft.verificationStatus === 'verified', draft.scoreEnabled, draft.evidenceSource);
+    } catch (error) {
+      // 积分入账失败不阻断日记保存。
+    }
+  }
+
+  /**
+   * 获取当前打开的日记草稿
+   * @returns 打开的草稿；下标越界（未打开详情）时为 undefined
+   */
   private openedDraft(): RecordDraft | undefined {
+    // 下标无效表示没有打开详情
     if (this.openedDiaryIndex < 0 || this.openedDiaryIndex >= this.savedDrafts.length) {
       return undefined;
     }
     return this.savedDrafts[this.openedDiaryIndex];
   }
 
+  /**
+   * 打开一条日记详情
+   * 首次打开内置示例记录时先转为真实草稿追加进列表并隐藏原示例；
+   * 已保存记录按 id 中的下标直接定位。
+   * @param id 记录 id（'saved-下标' 或 'preview-xxx'）
+   */
   private openDiary(id: string): void {
+    // 内置示例记录：转为真实草稿后打开，同时从首页隐藏该示例
     if (!id.startsWith('saved-')) {
       const preview: RecordDraft | undefined = this.previewDraft(id);
       if (preview === undefined) {
@@ -72,6 +99,7 @@ struct Index {
       this.viewingDiary = true;
       return;
     }
+    // 已保存记录：解析 'saved-' 后的下标并打开
     const index: number = Number.parseInt(id.substring(6));
     if (!Number.isNaN(index) && index >= 0 && index < this.savedDrafts.length) {
       this.openedDiaryIndex = index;
@@ -79,6 +107,12 @@ struct Index {
     }
   }
 
+  /**
+   * 内置示例记录 id 到日记草稿的映射
+   * 步行/光盘/骑行三条示例与首页静态数据保持一致
+   * @param id 示例记录 id
+   * @returns 对应的草稿数据；未知 id 返回 undefined
+   */
   private previewDraft(id: string): RecordDraft | undefined {
     if (id === 'preview-walk') {
       return {
@@ -184,6 +218,8 @@ struct Index {
             } else {
               this.savedDrafts = [...this.savedDrafts, _draft];
             }
+            // 日记已经保存后再异步入账，不让积分异常影响记录保存。
+            this.rewardSavedRecord(_draft);
             this.editingRecord = false;
             this.selectedBehavior = undefined;
             this.editingSavedIndex = -1;

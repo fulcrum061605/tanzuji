@@ -15,6 +15,10 @@ import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenc
  * 保存给日记首页或后续本地存储使用的记录草稿。
  */
 export interface RecordDraft {
+  /** 本地记录操作号：用于积分服务去重，编辑同一条记录不会重复领奖。 */
+  operationId?: string;
+  /** 记录发生时间（毫秒时间戳），用于首页和足迹按日期统计。 */
+  recordedAt?: number;
   /** 选中的低碳行为（含 id、名称与图标），回传给父组件继续使用 */
   behavior: BehaviorOption;
   /** 完成数量：按所选单位的原始数值，未换算为主单位 */
@@ -89,18 +93,31 @@ export struct RecordDetail {
   @State private hasPhoto: boolean = true;
   /** 数量输入框是否聚焦：驱动输入卡片描边加深变绿的编辑反馈 */
   @State private focusedAmount: boolean = false;
+  /** 核验状态：verified 已核验 / pending 待核实；只有 verified 计入正式碳积分 */
   @State private verificationStatus: 'verified' | 'pending' = 'pending';
+  /** 数量证据来源：系统定位、华为运动或手动记录 */
   @State private evidenceSource: EvidenceSource = 'manual';
+  /** 轨迹或运动数据的证据编号 */
   @State private evidenceId: string = '';
+  /** 测量流程的提示文案（权限、开始/结束测量与读取运动结果） */
   @State private measurementMessage: string = '';
+  /** 是否正在进行系统定位测量 */
   @State private tracking: boolean = false;
+  /** 证据服务实例：负责定位轨迹测量与华为运动数据读取 */
   private evidenceService: CarbonEvidenceService = new CarbonEvidenceService();
 
+  /**
+   * 判断当前行为是否需要系统自动测量
+   * 骑行与步行不接受手动输入数量，只能通过定位轨迹或华为运动获得
+   * @returns true 表示数量由系统测量
+   */
   private isAutoMeasured(): boolean {
     return this.behavior.id === 'bike' || this.behavior.id === 'walk';
   }
 
+  /** 组件即将出现：编辑已有记录时回填原草稿；新建记录时按行为初始化默认值与提示文案 */
   aboutToAppear(): void {
+    // 编辑模式：回填原草稿的全部字段
     if (this.initialDraft !== undefined) {
       this.amountText = this.initialDraft.amount.toString();
       this.selectedUnit = this.initialDraft.unit;
@@ -125,6 +142,7 @@ export struct RecordDetail {
     }
   }
 
+  /** 组件即将销毁：仍在定位测量时先停止，避免离开页面后持续消耗定位资源 */
   aboutToDisappear(): void {
     if (this.tracking) {
       this.evidenceService.stopLocationTracking();
@@ -267,6 +285,8 @@ export struct RecordDetail {
       return;
     }
     this.onSave?.({
+      operationId: this.initialDraft?.operationId ?? `${this.behavior.id}-${Date.now()}`,
+      recordedAt: this.initialDraft?.recordedAt ?? Date.now(),
       behavior: this.behavior,
       amount: this.amount(),
       unit: this.selectedUnit,
@@ -280,9 +300,15 @@ export struct RecordDetail {
     });
   }
 
+  /**
+   * 开始系统定位测量
+   * 申请定位与运动权限并注册轨迹监听，累计距离通过回调实时刷新数量输入框；
+   * 权限申请失败时降级为手动待核实
+   */
   private async startMeasurement(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      // 启动轨迹测量：回调把累计公里数写回数量输入框
       const result = await this.evidenceService.startLocationTracking(context, (distanceKm: number): void => {
         this.amountText = distanceKm.toFixed(3);
         this.evidenceSource = 'location';
@@ -290,11 +316,13 @@ export struct RecordDetail {
       this.measurementMessage = result.message;
       this.evidenceSource = result.source;
       this.evidenceId = result.evidenceId;
+      // 只有真正进入定位测量才置位跟踪标记
       this.tracking = result.source === 'location';
       if (this.tracking) {
         this.verificationStatus = 'pending';
       }
     } catch (error) {
+      // 权限申请失败：降级为手动待核实
       this.measurementMessage = '权限申请失败，本次记录将标记为待核实';
       this.evidenceSource = 'manual';
       this.verificationStatus = 'pending';
@@ -302,9 +330,14 @@ export struct RecordDetail {
     }
   }
 
+  /**
+   * 结束系统定位测量
+   * 停止轨迹监听并取回累计距离；距离足够（>50 米）时记录核验通过，否则保持待核实
+   */
   private async stopMeasurement(): Promise<void> {
     const result = await this.evidenceService.stopLocationTracking();
     this.tracking = false;
+    // 用测量结果回填数量、单位与核验状态
     this.amountText = result.amount.toFixed(3);
     this.selectedUnit = '公里';
     this.evidenceSource = result.source;
@@ -313,6 +346,11 @@ export struct RecordDetail {
     this.measurementMessage = result.message;
   }
 
+  /**
+   * 读取华为运动步数
+   * 步数按固定口径（0.7 米/步）换算为公里；读取成功且步数大于 0 时核验通过，
+   * 否则降级为手动待核实
+   */
   private async readHuaweiActivity(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -325,11 +363,13 @@ export struct RecordDetail {
         this.evidenceSource = 'health';
         this.evidenceId = result.evidenceId;
       } else {
+        // 无可用数据：降级为手动待核实
         this.verificationStatus = 'pending';
         this.evidenceSource = 'manual';
       }
       this.measurementMessage = result.message;
     } catch (error) {
+      // 健康服务不可用：降级为手动待核实
       this.verificationStatus = 'pending';
       this.evidenceSource = 'manual';
       this.measurementMessage = '华为运动数据暂不可用，本次记录将标记为待核实';
@@ -531,16 +571,24 @@ export struct RecordDetail {
     .borderRadius(14)
   }
 
+  /**
+   * 证据采集控制区
+   * 需要系统测量的行为（骑行/步行）：显示测量提示文案 + 开始/结束测量按钮，
+   * 步行额外提供"读取华为运动"入口；手动行为只显示记录方式提示
+   */
   @Builder
   private EvidenceControl() {
     if (this.isAutoMeasured()) {
+      // 自动测量行为：提示文案 + 操作按钮行
       Column({ space: 8 }) {
+        // 测量状态提示：已核验绿色、未核验灰色
         Text(this.measurementMessage)
           .width('100%')
           .fontSize(13)
           .fontColor(this.verificationStatus === 'verified' ? '#4C9576' : '#718078')
           .textAlign(TextAlign.Start)
         Row({ space: 8 }) {
+          // 测量中显示"结束测量"，未测量显示"申请权限并测量"
           if (this.tracking) {
             Button('结束测量', { type: ButtonType.Normal, stateEffect: false })
               .layoutWeight(1)
@@ -560,6 +608,7 @@ export struct RecordDetail {
               .borderRadius(18)
               .onClick(() => this.startMeasurement())
           }
+          // 步行额外提供华为运动步数读取入口
           if (this.behavior.id === 'walk') {
             Button('读取华为运动', { type: ButtonType.Normal, stateEffect: false })
               .layoutWeight(1)
@@ -575,6 +624,7 @@ export struct RecordDetail {
       .width('100%')
       .padding({ top: 2, bottom: 12 })
     } else {
+      // 手动行为：仅显示记录方式提示
       Text(this.measurementMessage)
         .width('100%')
         .fontSize(13)
