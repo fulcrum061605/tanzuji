@@ -182,34 +182,116 @@ export struct FootprintPage {
 
   /**
    * 当前时间口径对应的看板数据
-   * @returns 静态基线数据（日/月/年，默认周）
+   * @returns 当前时间口径下的本地真实记录聚合（日/月/年，默认周）
    */
   private data(): FootprintData {
-    switch (this.selectedPeriod) {
-      case '日': return DAY_DATA;
-      case '月': return MONTH_DATA;
-      case '年': return YEAR_DATA;
-      default: return WEEK_DATA;
+    const now: Date = new Date();
+    const start: Date = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (this.selectedPeriod === '周') {
+      const day: number = start.getDay() === 0 ? 7 : start.getDay();
+      start.setDate(start.getDate() - day + 1);
+    } else if (this.selectedPeriod === '月') {
+      start.setDate(1);
+    } else if (this.selectedPeriod === '年') {
+      start.setMonth(0, 1);
     }
+    const end: Date = new Date(start.getTime());
+    if (this.selectedPeriod === '日') {
+      end.setDate(end.getDate() + 1);
+    } else if (this.selectedPeriod === '周') {
+      end.setDate(end.getDate() + 7);
+    } else if (this.selectedPeriod === '月') {
+      end.setMonth(end.getMonth() + 1);
+    } else {
+      end.setFullYear(end.getFullYear() + 1);
+    }
+    const allInPeriod: RecordDraft[] = this.savedDrafts.filter((draft: RecordDraft): boolean => {
+      const time: number = draft.recordedAt ?? draft.createdAt ?? 0;
+      return time >= start.getTime() && time < end.getTime();
+    });
+    const verified: RecordDraft[] = allInPeriod.filter((draft: RecordDraft): boolean => {
+      return draft.verificationStatus === 'verified' && draft.scoreEnabled;
+    });
+    const total: number = verified.reduce((sum: number, draft: RecordDraft): number => sum + draft.reductionKg, 0);
+    const goal: number = this.selectedPeriod === '日' ? 2 : this.selectedPeriod === '周' ? 10 :
+      this.selectedPeriod === '月' ? 40 : 480;
+    return {
+      total: total, goal: goal,
+      comparison: verified.length === 0 ? '暂无已核验记录' : '基于本地已核验记录动态计算',
+      trendTitle: this.selectedPeriod === '日' ? '今日减排节奏' :
+        this.selectedPeriod === '周' ? '本周每日减排' : this.selectedPeriod === '月' ? '本月每周减排' : '年度减排趋势',
+      trend: this.buildTrend(verified), categories: this.buildCategories(verified),
+      verifiedCount: verified.length, totalCount: allInPeriod.length,
+      treeEquivalent: `${(total / 22).toFixed(2)} 棵树吸收量（估算）`,
+      travelEquivalent: `少开燃油车约 ${(total / 0.175).toFixed(1)} km（估算）`
+    };
+  }
+
+  /**
+   * 按时间口径把已核验记录聚合为时序柱状图数据点
+   * 日按 6 个时段、周按 7 天、月按 4 周、年按 12 个月分桶累计减排量
+   * @param records 当前时间口径内的已核验记录
+   * @returns 时序柱状图数据点数组
+   */
+  private buildTrend(records: RecordDraft[]): TrendPoint[] {
+    const count: number = this.selectedPeriod === '日' ? 6 : this.selectedPeriod === '周' ? 7 :
+      this.selectedPeriod === '月' ? 4 : 12;
+    const values: number[] = new Array<number>(count).fill(0);
+    records.forEach((draft: RecordDraft): void => {
+      const date: Date = new Date(draft.recordedAt ?? draft.createdAt ?? 0);
+      let index: number = 0;
+      if (this.selectedPeriod === '日') {
+        index = Math.min(count - 1, Math.floor((date.getHours() / 24) * count));
+      } else if (this.selectedPeriod === '周') {
+        index = date.getDay() === 0 ? 6 : date.getDay() - 1;
+      } else if (this.selectedPeriod === '月') {
+        index = Math.min(count - 1, Math.floor((date.getDate() - 1) / 7));
+      } else {
+        index = date.getMonth();
+      }
+      values[index] += draft.reductionKg;
+    });
+    const labels: string[] = this.selectedPeriod === '日' ? ['6时', '9时', '12时', '15时', '18时', '21时'] :
+      this.selectedPeriod === '周' ? ['一', '二', '三', '四', '五', '六', '日'] :
+        this.selectedPeriod === '月' ? ['第1周', '第2周', '第3周', '第4周'] :
+          ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'];
+    return labels.map((label: string, index: number): TrendPoint => ({ label: label, value: values[index] }));
+  }
+
+  /**
+   * 把已核验记录按行为归入绿色出行/低碳饮食/节水节电/循环利用四类
+   * 减排量为 0 的类目不展示
+   * @param records 当前时间口径内的已核验记录
+   * @returns 行为构成类目列表
+   */
+  private buildCategories(records: RecordDraft[]): CategoryPoint[] {
+    const groups: CategoryPoint[] = [
+      { name: '绿色出行', value: 0, color: '#3E8E68', icon: $r('app.media.diary_bike') },
+      { name: '低碳饮食', value: 0, color: '#D4A24C', icon: $r('app.media.diary_meal') },
+      { name: '节水节电', value: 0, color: '#4F8FA5', icon: $r('app.media.diary_water') },
+      { name: '循环利用', value: 0, color: '#7A9270', icon: $r('app.media.diary_reuse') }
+    ];
+    records.forEach((draft: RecordDraft): void => {
+      const id: string = draft.behavior.id;
+      const index: number = ['walk', 'bike', 'transit', 'carpool', 'metro'].includes(id) ? 0 :
+        ['meal', 'lowCarbonMeal'].includes(id) ? 1 :
+          ['electricity', 'water', 'standby', 'shower'].includes(id) ? 2 : 3;
+      groups[index].value += draft.reductionKg;
+    });
+    return groups.filter((item: CategoryPoint): boolean => item.value > 0);
   }
 
   /** 当前会话中新建且通过系统核验的记录才进入正式减排量。 */
   private verifiedDraftTotal(): number {
-    let total: number = 0;
-    this.savedDrafts.forEach((draft: RecordDraft): void => {
-      if (draft.verificationStatus === 'verified' && draft.scoreEnabled) {
-        total += draft.reductionKg;
-      }
-    });
-    return total;
+    return this.data().total;
   }
 
   /**
-   * 累计减排量：静态基线 + 本次会话已核验记录
+   * 累计减排量：当前时间口径下已核验真实记录之和
    * @returns 累计减排量（kg CO₂e）
    */
   private totalReduction(): number {
-    return this.data().total + this.verifiedDraftTotal();
+    return this.data().total;
   }
 
   /**
@@ -232,25 +314,19 @@ export struct FootprintPage {
   }
 
   /**
-   * 已核验记录条数：静态基线 + 本次会话已核验记录
+   * 已核验记录条数：当前时间口径下已核验真实记录
    * @returns 已核验记录条数
    */
   private verifiedRecordCount(): number {
-    let count: number = this.data().verifiedCount;
-    this.savedDrafts.forEach((draft: RecordDraft): void => {
-      if (draft.verificationStatus === 'verified' && draft.scoreEnabled) {
-        count += 1;
-      }
-    });
-    return count;
+    return this.data().verifiedCount;
   }
 
   /**
-   * 记录总条数：静态基线 + 本次会话全部记录
+   * 记录总条数：当前时间口径下全部本地记录
    * @returns 记录总条数
    */
   private totalRecordCount(): number {
-    return this.data().totalCount + this.savedDrafts.length;
+    return this.data().totalCount;
   }
 
   /**

@@ -10,11 +10,17 @@
 import { BehaviorOption } from './BehaviorPicker';
 import { common } from '@kit.AbilityKit';
 import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenceService';
+import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
 
 /**
  * 保存给日记首页或后续本地存储使用的记录草稿。
  */
 export interface RecordDraft {
+  /** 稳定的本地记录主键，不依赖数组下标。 */
+  recordId?: string;
+  /** 首次创建时间与最后更新时间。 */
+  createdAt?: number;
+  updatedAt?: number;
   /** 本地记录操作号：用于积分服务去重，编辑同一条记录不会重复领奖。 */
   operationId?: string;
   /** 记录发生时间（毫秒时间戳），用于首页和足迹按日期统计。 */
@@ -31,6 +37,8 @@ export interface RecordDraft {
   note: string;
   /** 是否携带图片：当前为模拟标志，接入相机后替换为真实图片信息 */
   hasPhoto: boolean;
+  /** 用户图片 URI；当前未接入相册时为空字符串。 */
+  photoUri?: string;
   /** 数量来源：系统定位、华为运动或手动待核实。 */
   evidenceSource: EvidenceSource;
   /** 验证状态：只有 verified 记录才计入正式碳积分。 */
@@ -105,14 +113,17 @@ export struct RecordDetail {
   @State private tracking: boolean = false;
   /** 证据服务实例：负责定位轨迹测量与华为运动数据读取 */
   private evidenceService: CarbonEvidenceService = new CarbonEvidenceService();
+  /** 碳因子服务：统一提供减排系数、计算与口径来源 */
+  private factorService: CarbonFactorService = new CarbonFactorService();
 
   /**
    * 判断当前行为是否需要系统自动测量
-   * 骑行与步行不接受手动输入数量，只能通过定位轨迹或华为运动获得
+   * 所有出行距离行为不接受手动输入数量，只能通过定位轨迹或华为运动获得
    * @returns true 表示数量由系统测量
    */
   private isAutoMeasured(): boolean {
-    return this.behavior.id === 'bike' || this.behavior.id === 'walk';
+    return this.behavior.id === 'bike' || this.behavior.id === 'walk' ||
+      this.behavior.id === 'transit' || this.behavior.id === 'carpool' || this.behavior.id === 'metro';
   }
 
   /** 组件即将出现：编辑已有记录时回填原草稿；新建记录时按行为初始化默认值与提示文案 */
@@ -196,28 +207,7 @@ export struct RecordDetail {
    * @returns 当前行为的减排系数
    */
   private factor(): number {
-    switch (this.behavior.id) {
-      case 'walk': return 0.21;
-      case 'bike': return 0.175;
-      case 'transit': return 0.08;
-      case 'carpool': return 0.12;
-      case 'metro': return 0.10;
-      case 'electricity': return 0.58;
-      case 'water': return 0.0003;
-      case 'standby': return 0.18;
-      case 'shower': return 0.0003;
-      case 'meal': return 0.18;
-      case 'lowCarbonMeal': return 0.22;
-      case 'recycle': return 0.45;
-      case 'paperRecycle': return 0.52;
-      case 'clothesRecycle': return 0.68;
-      case 'reuse': return 0.12;
-      case 'disposable': return 0.08;
-      case 'shopping': return 0.06;
-      case 'reusable': return 0.08;
-      case 'secondhand': return 0.20;
-      default: return 0.1;
-    }
+    return this.factorService.getByBehavior(this.behavior.id)?.factor ?? 0;
   }
 
   /**
@@ -239,7 +229,8 @@ export struct RecordDetail {
     // 查找所选单位的换算系数；异常时按主单位（1）兜底，保证计算不中断
     const unit: UnitOption | undefined = this.units().find((item: UnitOption) => item.name === this.selectedUnit);
     const baseAmount: number = this.amount() * (unit?.toBase ?? 1);
-    return baseAmount * this.factor();
+    return this.factorService.calculate(this.behavior.id, this.amount(), this.selectedUnit,
+      unit?.toBase ?? 1);
   }
 
   /**
@@ -257,6 +248,14 @@ export struct RecordDetail {
       return value.toFixed(3);
     }
     return value.toFixed(2);
+  }
+
+  /**
+   * 核算依据文案：展示统一碳因子目录的口径来源，供追溯数据出处
+   * @returns 口径来源说明文本
+   */
+  private factorSourceText(): string {
+    return `口径来源：${CARBON_FACTOR_CATALOG_SOURCE}`;
   }
 
   /**
@@ -281,22 +280,36 @@ export struct RecordDetail {
    * 将当前表单状态整理为 RecordDraft 经 onSave 交给父组件
    */
   private save(): void {
-    if (!this.isAutoMeasured() && this.amount() <= 0) {
+    const amount: number = this.amount();
+    // 自动行为必须来自真实测量，且距离至少 50 米；手动行为永远待核实。
+    if (amount <= 0 || (this.isAutoMeasured() &&
+      (amount <= 0.05 || this.verificationStatus !== 'verified' ||
+        (this.evidenceSource !== 'location' && this.evidenceSource !== 'health')))) {
       return;
     }
+    if (!this.factorService.supports(this.behavior.id, this.selectedUnit)) {
+      return;
+    }
+    const now: number = Date.now();
+    const evidenceSource: EvidenceSource = this.isAutoMeasured() ? this.evidenceSource : 'manual';
+    const verificationStatus: 'verified' | 'pending' = this.isAutoMeasured() ? this.verificationStatus : 'pending';
     this.onSave?.({
+      recordId: this.initialDraft?.recordId ?? `${this.behavior.id}-${now}-${Math.floor(Math.random() * 100000)}`,
       operationId: this.initialDraft?.operationId ?? `${this.behavior.id}-${Date.now()}`,
       recordedAt: this.initialDraft?.recordedAt ?? Date.now(),
+      createdAt: this.initialDraft?.createdAt ?? now,
+      updatedAt: now,
       behavior: this.behavior,
-      amount: this.amount(),
+      amount: amount,
       unit: this.selectedUnit,
       reductionKg: this.reduction(),
       note: this.note,
       hasPhoto: this.hasPhoto,
-      evidenceSource: this.evidenceSource,
-      verificationStatus: this.verificationStatus,
+      photoUri: this.initialDraft?.photoUri ?? '',
+      evidenceSource: evidenceSource,
+      verificationStatus: verificationStatus,
       evidenceId: this.evidenceId,
-      scoreEnabled: this.verificationStatus === 'verified'
+      scoreEnabled: verificationStatus === 'verified' && evidenceSource !== 'manual'
     });
   }
 
@@ -555,6 +568,10 @@ export struct RecordDetail {
         Text('根据完成数量自动估算，仅供记录参考')
           .fontSize(11)
           .fontColor('#718078')
+        Text(this.factorSourceText())
+          .fontSize(9)
+          .fontColor('#98A79D')
+          .maxLines(2)
       }
       .layoutWeight(1)
       // 右侧：即时估算值，加粗深绿突出显示

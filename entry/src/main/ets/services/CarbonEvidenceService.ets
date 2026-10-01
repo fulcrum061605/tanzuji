@@ -76,7 +76,7 @@ export class CarbonEvidenceService {
    * @param permissions 待申请的权限列表
    * @returns true 表示全部权限均已授予
    */
-  private async requestPermissionList(context: common.Context, permissions: Array<Permissions>): Promise<boolean> {
+  private async requestPermissionList(context: common.Context, permissions: Permissions[]): Promise<boolean> {
     const atManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
     const result: PermissionRequestResult =
       await atManager.requestPermissionsFromUser(context, permissions);
@@ -90,7 +90,7 @@ export class CarbonEvidenceService {
    * @returns true 表示定位与运动权限均已授予
    */
   private async requestLocationPermissions(context: common.Context): Promise<boolean> {
-    const permissions: Array<Permissions> = [
+    const permissions: Permissions[] = [
       LOCATION_PERMISSION,
       APPROXIMATE_LOCATION_PERMISSION,
       MOTION_PERMISSION

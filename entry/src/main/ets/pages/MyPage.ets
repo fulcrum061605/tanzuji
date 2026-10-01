@@ -8,6 +8,8 @@ import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
 import { CarbonPointsService, PointsReward, PointsSnapshot } from '../services/CarbonPointsService';
+import { RecordDraft } from './RecordDetail';
+import { BackupPayload, BackupService } from '../services/BackupService';
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -30,6 +32,8 @@ export struct MyPage {
   @Prop selectedTab: string = '我的';
   /** 切换底部栏目回调：参数为目标栏目名，由入口页完成页面切换 */
   onNavigate?: (tab: string) => void;
+  @Prop savedDrafts: RecordDraft[] = [];
+  onRestoreRecords?: (records: RecordDraft[]) => void;
   /** 全部文章列表：用于渲染收藏项与详情 */
   @State private articles: KnowledgeArticle[] = [];
   /** 已收藏的文章 id 列表 */
@@ -38,6 +42,8 @@ export struct MyPage {
   @State private showingFavorites: boolean = false;
   /** 是否显示积分与模拟权益中心 */
   @State private showingRewards: boolean = false;
+  @State private showingDataManagement: boolean = false;
+  @State private csvPreview: string = '';
   /** 当前打开的收藏文章 id：非空时进入文章详情视图 */
   @State private openedArticleId: string = '';
   /** 内容加载中标记 */
@@ -60,6 +66,7 @@ export struct MyPage {
   private service: KnowledgeService = new KnowledgeService();
   /** 本地积分服务：负责签到、核验入账与权益兑换的持久化 */
   private pointsService: CarbonPointsService = new CarbonPointsService();
+  private backupService: BackupService = new BackupService();
 
   /** 可兑换的模拟权益清单：仅用于演示，兑换结果只保存在本机 */
   private readonly rewardItems: PointsReward[] = [
@@ -171,6 +178,43 @@ export struct MyPage {
       this.getUIContext().getPromptAction().showToast({ message: message, duration: 1600 });
     } catch (error) {
       // 提示失败不影响页面内容。
+    }
+  }
+
+  private async backupRecords(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const pointsSnapshot: PointsSnapshot = await this.pointsService.load(context);
+      await this.backupService.backup(context, this.savedDrafts, pointsSnapshot, this.favoriteIds);
+      this.showToast(`已备份 ${this.savedDrafts.length} 条记录`);
+    } catch (error) {
+      this.showToast('备份失败，请稍后重试');
+    }
+  }
+
+  private async restoreRecords(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const payload: BackupPayload = await this.backupService.restore(context);
+      if (payload.records.length > 0) {
+        this.onRestoreRecords?.(payload.records);
+        await this.pointsService.restoreSnapshot(context, payload.points);
+        this.favoriteIds = payload.favoriteIds;
+        await this.service.saveFavorites(context, this.favoriteIds);
+      }
+      this.showToast(payload.records.length === 0 ? '没有可恢复的本地备份' : `已恢复 ${payload.records.length} 条记录、积分和收藏`);
+    } catch (error) {
+      this.showToast('恢复失败，请稍后重试');
+    }
+  }
+
+  private async exportCsvReport(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      this.csvPreview = await this.backupService.exportCsv(context, this.savedDrafts);
+      this.showToast('CSV 报表已生成，可在下方查看');
+    } catch (error) {
+      this.showToast('报表生成失败，请稍后重试');
     }
   }
 
@@ -376,7 +420,7 @@ export struct MyPage {
           .syncLoad(true)
           .width(18)
           .height(18)
-        Text('核验记录每条 +10，每日最多 3 条；手动待核实记录不计分')
+        Text('积分按核验减排量计算，单条 2–20 分；每日最多 30 分，手动待核实不计分')
           .fontSize(12)
           .fontColor('#718078')
           .maxLines(2)
@@ -560,6 +604,44 @@ export struct MyPage {
     .width('100%')
     .height('100%')
     .backgroundColor('#F7F8F2')
+  }
+
+  @Builder
+  private DataManagement() {
+    Column() {
+      Row() {
+        Button({ type: ButtonType.Normal, stateEffect: false }) {
+          Text('‹').fontSize(40).fontColor('#174E3A')
+        }
+        .width(44).height(48).padding(0).backgroundColor(Color.Transparent)
+        .onClick((): void => { this.showingDataManagement = false; })
+        Text('数据管理').fontSize(22).fontWeight(FontWeight.Bold).fontColor('#123F2E').layoutWeight(1).textAlign(TextAlign.Center)
+        Blank().width(44)
+      }
+      .width('100%').height(60).padding({ left: 14, right: 14 })
+      Column({ space: 12 }) {
+        Text('本地记录工具').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#123F2E')
+        Text('数据只保存在本机。备份用于演示恢复，CSV 可用于老师查看统计明细。')
+          .fontSize(13).fontColor('#718078').width('100%')
+        Button('备份当前记录', { type: ButtonType.Capsule, stateEffect: true })
+          .width('100%').height(42).backgroundColor('#4C9576').fontColor('#FFFFFF')
+          .onClick((): void => { this.backupRecords(); })
+        Button('读取最近备份', { type: ButtonType.Capsule, stateEffect: true })
+          .width('100%').height(42).backgroundColor('#E5F0E5').fontColor('#376D52')
+          .onClick((): void => { this.restoreRecords(); })
+        Button('生成 CSV 报表', { type: ButtonType.Capsule, stateEffect: true })
+          .width('100%').height(42).backgroundColor('#E5F0E5').fontColor('#376D52')
+          .onClick((): void => { this.exportCsvReport(); })
+        if (this.csvPreview.length > 0) {
+          TextArea({ text: this.csvPreview })
+            .width('100%').height(220).fontSize(11).fontColor('#365C4B')
+            .backgroundColor('#FAFBF6').border({ width: 1, color: '#DDE8DE' }).borderRadius(12)
+            .enabled(false)
+        }
+      }
+      .width('100%').padding({ left: 22, right: 22, top: 16, bottom: 30 })
+    }
+    .width('100%').height('100%').backgroundColor('#F7F8F2')
   }
 
   /**
@@ -956,6 +1038,8 @@ export struct MyPage {
     } else if (this.showingRewards) {
       // 积分中心作为“我的”页内子页面打开，返回后保留当前余额和收藏状态。
       this.RewardsCenter()
+    } else if (this.showingDataManagement) {
+      this.DataManagement()
     } else if (this.showingFavorites) {
       // 收藏列表视图
       this.FavoriteList()
@@ -980,6 +1064,9 @@ export struct MyPage {
             // 菜单入口：成长知识库（切换到成长栏目）
             this.MenuRow('成长知识库', '双碳基础与校园低碳实践', $r('app.media.diary_sprout'), () => {
               this.navigate('成长');
+            })
+            this.MenuRow('数据管理', '备份、恢复与导出 CSV 报表', $r('app.media.diary_leaf'), () => {
+              this.showingDataManagement = true;
             })
           }
           .width('100%')

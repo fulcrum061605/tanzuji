@@ -44,6 +44,8 @@ interface DiaryEntry {
   verificationStatus: 'verified' | 'pending';
   /** 只有已核验记录才计入正式减排汇总。 */
   scoreEnabled: boolean;
+  /** 记录时间戳；示例记录没有时间戳。 */
+  recordedAt?: number;
 }
 
 /**
@@ -57,7 +59,7 @@ const DIARY_EXAMPLES: DiaryEntry[] = [
     time: '08:10',
     title: '今天走路去上课',
     content: '绕过操场，顺便看看早晨的树影。',
-    label: '步行 · 1.2 km',
+    label: '演示 · 步行 · 1.2 km',
     icon: $r('app.media.diary_walk'),
     reductionKg: 0.25,
     verificationStatus: 'verified',
@@ -69,7 +71,7 @@ const DIARY_EXAMPLES: DiaryEntry[] = [
     time: '12:20',
     title: '午餐刚刚好',
     content: '吃完了，也没有浪费。',
-    label: '光盘行动',
+    label: '演示 · 光盘行动',
     icon: $r('app.media.diary_meal'),
     reductionKg: 0.18,
     verificationStatus: 'verified',
@@ -81,7 +83,7 @@ const DIARY_EXAMPLES: DiaryEntry[] = [
     time: '17:40',
     title: '骑车去图书馆',
     content: '晚风很舒服，今天慢一点也很好。',
-    label: '骑行 · 2.4 km',
+    label: '演示 · 骑行 · 2.4 km',
     icon: $r('app.media.diary_bike'),
     photo: $r('app.media.diary_campus'),
     reductionKg: 0.83,
@@ -171,8 +173,8 @@ export struct Home {
         ? note
         : `完成 ${draft.amount}${draft.unit}，继续保持低碳生活。`;
       return {
-        id: `saved-${index}`,
-        time: '刚刚',
+        id: `saved-${draft.recordId ?? draft.operationId ?? `legacy-${index}`}`,
+        time: this.formatTime(draft.recordedAt ?? draft.createdAt ?? Date.now()),
         title: title,
         content: content,
         label: draft.verificationStatus === 'verified'
@@ -182,7 +184,8 @@ export struct Home {
         photo: draft.hasPhoto ? $r('app.media.diary_campus') : undefined,
         reductionKg: draft.reductionKg,
         verificationStatus: draft.verificationStatus,
-        scoreEnabled: draft.scoreEnabled && draft.verificationStatus === 'verified'
+        scoreEnabled: draft.scoreEnabled && draft.verificationStatus === 'verified',
+        recordedAt: draft.recordedAt ?? draft.createdAt
       };
     });
     const visibleExamples: DiaryEntry[] = this.diaryEntries.filter((entry: DiaryEntry): boolean => {
@@ -193,7 +196,7 @@ export struct Home {
 
   /** 首页顶部概览使用当前列表中的真实记录数量与减排量。 */
   private entryCount(): number {
-    return this.combinedEntries().length;
+    return this.savedDrafts.length;
   }
 
   /**
@@ -224,12 +227,32 @@ export struct Home {
    */
   private reductionTotal(): string {
     let total: number = 0;
-    this.combinedEntries().forEach((entry: DiaryEntry) => {
-      if (entry.scoreEnabled) {
-        total += entry.reductionKg;
+    this.savedDrafts.forEach((draft: RecordDraft): void => {
+      if (draft.scoreEnabled && draft.verificationStatus === 'verified') {
+        total += draft.reductionKg;
       }
     });
     return total.toFixed(2);
+  }
+
+  /**
+   * 时间戳格式化为"时:分"（如 '17:40'），不足两位补零
+   * @param timestamp 毫秒时间戳
+   * @returns 时:分文本
+   */
+  private formatTime(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+  }
+
+  /**
+   * 时间戳格式化为"MM月DD日"（如 '09月28日'）
+   * @param timestamp 毫秒时间戳
+   * @returns 日期文本
+   */
+  private formatDate(timestamp: number): string {
+    const date: Date = new Date(timestamp);
+    return `${(date.getMonth() + 1).toString().padStart(2, '0')}月${date.getDate().toString().padStart(2, '0')}日`;
   }
 
   /**
@@ -377,7 +400,7 @@ export struct Home {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 7 }) {
           // 当前选中日期
-          Text('09月28日')
+          Text(this.formatDate(Date.now()))
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#123D2D')
@@ -392,7 +415,7 @@ export struct Home {
       .padding({ left: 12, right: 12 })
       .backgroundColor(Color.Transparent)
       .borderRadius(16)
-      .accessibilityText('09月28日，展开日历')
+      .accessibilityText(`${this.formatDate(Date.now())}，展开日历`)
       .onClick(() => this.openCalendar())
     }
     .width('100%')
@@ -597,6 +620,7 @@ export struct Home {
    *    呈现带淡绿赋色的系统液态玻璃；加号按钮同时启用交互形变与按压光晕，按压反馈由材质光效提供。
    * 属性顺序要求：systemMaterial 必须写在背景/描边/阴影之后，材质生效时才能覆盖这些样式；
    * 不具备能力的设备上材质为 undefined，自动保持兜底层磨砂外观。全页仅此两处模糊/材质层，控制性能开销。
+   * @param showPlus 是否显示悬浮"新建日记"加号按钮（仅日记栏目显示）
    */
   @Builder
   private BottomControls(showPlus: boolean) {

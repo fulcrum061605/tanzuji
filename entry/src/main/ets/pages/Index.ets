@@ -20,6 +20,7 @@ import { MyPage } from './MyPage';
 import { FootprintPage } from './FootprintPage';
 import { KnowledgeCenter } from './KnowledgeCenter';
 import { CarbonPointsService } from '../services/CarbonPointsService';
+import { DiaryStorageService } from '../services/DiaryStorageService';
 
 /**
  * 入口组件
@@ -55,13 +56,33 @@ struct Index {
   @State private hiddenPreviewIds: string[] = [];
   /** 本地积分服务：真实保存的核验记录才会入账，示例数据不会自动产生积分。 */
   private pointsService: CarbonPointsService = new CarbonPointsService();
+  /** 本地记录服务：页面重启后仍恢复同一批记录。 */
+  private diaryStorage: DiaryStorageService = new DiaryStorageService();
+
+  /** 组件即将出现：从本地存储恢复上次会话保存的日记记录。 */
+  aboutToAppear(): void {
+    this.loadSavedDrafts();
+  }
+
+  /**
+   * 从本地 Preferences 恢复已保存的日记记录
+   * 读取失败时回退为空列表，页面以全新状态启动
+   */
+  private async loadSavedDrafts(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      this.savedDrafts = await this.diaryStorage.load(context);
+    } catch (error) {
+      this.savedDrafts = [];
+    }
+  }
 
   /** 保存成功后为核验记录入账，去重和每日上限由服务层统一执行。 */
   private async rewardSavedRecord(draft: RecordDraft): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       await this.pointsService.rewardVerifiedRecord(context, draft.operationId ?? '',
-        draft.verificationStatus === 'verified', draft.scoreEnabled, draft.evidenceSource);
+        draft.verificationStatus === 'verified', draft.scoreEnabled, draft.evidenceSource, draft.reductionKg);
     } catch (error) {
       // 积分入账失败不阻断日记保存。
     }
@@ -99,9 +120,12 @@ struct Index {
       this.viewingDiary = true;
       return;
     }
-    // 已保存记录：解析 'saved-' 后的下标并打开
-    const index: number = Number.parseInt(id.substring(6));
-    if (!Number.isNaN(index) && index >= 0 && index < this.savedDrafts.length) {
+    // 已保存记录：解析稳定 recordId，不依赖数组下标
+    const recordId: string = id.substring(6);
+    const index: number = this.savedDrafts.findIndex((item: RecordDraft): boolean => {
+      return (item.recordId ?? item.operationId ?? '') === recordId;
+    });
+    if (index >= 0) {
       this.openedDiaryIndex = index;
       this.viewingDiary = true;
     }
@@ -116,6 +140,7 @@ struct Index {
   private previewDraft(id: string): RecordDraft | undefined {
     if (id === 'preview-walk') {
       return {
+        recordId: 'preview-walk-record', createdAt: Date.now() - 3600000, updatedAt: Date.now() - 3600000,
         behavior: { id: 'walk', name: '步行', icon: $r('app.media.diary_walk') },
         amount: 1.2, unit: '公里', reductionKg: 0.25,
         note: '绕过操场，顺便看看早晨的树影。', hasPhoto: false,
@@ -125,15 +150,17 @@ struct Index {
     }
     if (id === 'preview-meal') {
       return {
+        recordId: 'preview-meal-record', createdAt: Date.now() - 1800000, updatedAt: Date.now() - 1800000,
         behavior: { id: 'meal', name: '光盘行动', icon: $r('app.media.diary_meal') },
         amount: 1, unit: '份', reductionKg: 0.18,
         note: '吃完了，也没有浪费。', hasPhoto: false,
-        evidenceSource: 'manual', verificationStatus: 'verified',
-        evidenceId: 'preview-manual-meal', scoreEnabled: true
+        evidenceSource: 'manual', verificationStatus: 'pending',
+        evidenceId: 'preview-manual-meal', scoreEnabled: false
       };
     }
     if (id === 'preview-bike') {
       return {
+        recordId: 'preview-bike-record', createdAt: Date.now() - 900000, updatedAt: Date.now() - 900000,
         behavior: { id: 'bike', name: '骑行', icon: $r('app.media.diary_bike') },
         amount: 2.4, unit: '公里', reductionKg: 0.83,
         note: '晚风很舒服，今天慢一点也很好。', hasPhoto: true,
@@ -169,6 +196,11 @@ struct Index {
       } else if (this.activeTab === '我的' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
         MyPage({
           selectedTab: this.activeTab,
+          savedDrafts: this.savedDrafts,
+          onRestoreRecords: (records: RecordDraft[]) => {
+            this.savedDrafts = records;
+            this.persistAllDrafts(records);
+          },
           onNavigate: (tab: string) => {
             if (tab === '我的') {
               return;
@@ -190,9 +222,11 @@ struct Index {
             this.editingRecord = true;
           },
           onDelete: () => {
-            this.savedDrafts = this.savedDrafts.filter((_item: RecordDraft, index: number) => {
-              return index !== this.openedDiaryIndex;
-            });
+            const current: RecordDraft | undefined = this.openedDraft();
+            if (current !== undefined) {
+              this.removeDraft(current.recordId ?? current.operationId ?? '');
+            }
+            this.savedDrafts = this.savedDrafts.filter((_item: RecordDraft, index: number) => index !== this.openedDiaryIndex);
             this.viewingDiary = false;
             this.openedDiaryIndex = -1;
           }
@@ -218,6 +252,7 @@ struct Index {
             } else {
               this.savedDrafts = [...this.savedDrafts, _draft];
             }
+            this.persistDraft(_draft);
             // 日记已经保存后再异步入账，不让积分异常影响记录保存。
             this.rewardSavedRecord(_draft);
             this.editingRecord = false;
@@ -263,6 +298,51 @@ struct Index {
           this.loggedIn = true;
         }
       })
+    }
+  }
+
+  /**
+   * 新增或更新一条记录并立即落盘
+   * 落盘失败时页面内存列表仍可用，下次保存会再次尝试写入
+   * @param draft 待持久化的记录草稿
+   */
+  private async persistDraft(draft: RecordDraft): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      this.savedDrafts = await this.diaryStorage.upsert(context, draft);
+    } catch (error) {
+      // 页面内存状态仍可继续使用，下一次保存会再次尝试落盘。
+    }
+  }
+
+  /**
+   * 按 recordId 从本地存储删除一条记录
+   * 删除失败时由页面内存列表完成即时移除，不阻塞用户操作
+   * @param recordId 记录主键；空串直接返回
+   */
+  private async removeDraft(recordId: string): Promise<void> {
+    if (recordId.length === 0) {
+      return;
+    }
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      this.savedDrafts = await this.diaryStorage.remove(context, recordId);
+    } catch (error) {
+      // 删除失败时由当前页内存列表完成即时移除，避免阻塞用户操作。
+    }
+  }
+
+  /**
+   * 整体覆盖保存全部记录（备份恢复后使用）
+   * 落盘失败时保留当前会话数据并等待下次保存
+   * @param records 恢复后的完整记录列表
+   */
+  private async persistAllDrafts(records: RecordDraft[]): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      await this.diaryStorage.saveAll(context, records);
+    } catch (error) {
+      // 恢复后的页面状态已经更新，落盘失败时保留当前会话数据并等待下次保存。
     }
   }
 }

@@ -6,6 +6,7 @@ import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { BehaviorOption } from './BehaviorPicker';
 import { RecordDraft } from './RecordDetail';
+import { CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -92,7 +93,7 @@ export struct DiaryDetail {
    * @returns 月份与星期文案
    */
   private monthWeek(): string {
-    const date: Date = new Date();
+    const date: Date = new Date(this.draft.recordedAt ?? this.draft.createdAt ?? Date.now());
     const weekNames: string[] = ['日', '一', '二', '三', '四', '五', '六'];
     return `${(date.getMonth() + 1).toString().padStart(2, '0')}月 · 周${weekNames[date.getDay()]}`;
   }
@@ -102,7 +103,7 @@ export struct DiaryDetail {
    * @returns 如 '28'
    */
   private day(): string {
-    return new Date().getDate().toString().padStart(2, '0');
+    return new Date(this.draft.recordedAt ?? this.draft.createdAt ?? Date.now()).getDate().toString().padStart(2, '0');
   }
 
   /**
@@ -110,7 +111,7 @@ export struct DiaryDetail {
    * @returns 如 '17:40'
    */
   private time(): string {
-    const date: Date = new Date();
+    const date: Date = new Date(this.draft.recordedAt ?? this.draft.createdAt ?? Date.now());
     return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
   }
 
@@ -124,6 +125,21 @@ export struct DiaryDetail {
       return this.draft.evidenceSource === 'health' ? '华为运动已核验' : '系统轨迹已核验';
     }
     return '待核实，不计入正式减排';
+  }
+
+  /**
+   * 数量来源说明文案
+   * 按证据来源显示华为运动、系统定位或手动填写的对应说明
+   * @returns 数量来源说明文案
+   */
+  private evidenceText(): string {
+    if (this.draft.evidenceSource === 'health') {
+      return '数量来源：华为运动授权数据（步数换算，估算）';
+    }
+    if (this.draft.evidenceSource === 'location') {
+      return '数量来源：系统定位轨迹（已过滤异常点）';
+    }
+    return '数量来源：手动填写，待核实';
   }
 
   /** 分享日记：当前为占位提示，分享能力将在后续版本接入 */
@@ -267,6 +283,24 @@ export struct DiaryDetail {
             .fontSize(16)
             .fontColor(this.draft.verificationStatus === 'verified' ? '#5D806C' : '#9A8060')
         }
+        Row({ space: 14 }) {
+          Image($r('app.media.diary_leaf'))
+            .syncLoad(true)
+            .width(25)
+            .height(25)
+          Text(`减排量：${this.draft.reductionKg.toFixed(3)} kg CO₂e · ${this.draft.amount}${this.draft.unit}`)
+            .fontSize(16)
+            .fontColor('#5D806C')
+        }
+        Text(this.evidenceText())
+          .fontSize(13)
+          .fontColor('#7A9489')
+          .width('100%')
+        Text(`核算依据：${CARBON_FACTOR_CATALOG_SOURCE}`)
+          .fontSize(11)
+          .fontColor('#9AA8A1')
+          .width('100%')
+          .maxLines(3)
       }
       .alignItems(HorizontalAlign.Start)
       .width('100%')

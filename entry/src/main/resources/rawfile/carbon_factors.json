@@ -1,0 +1,27 @@
+{
+  "version": "2026.1",
+  "source": "GB/T 32150—2015、IPCC 2006 Guidelines 及生态环境主管部门公开电力因子；行为值为替代行为估算",
+  "sourceType": "official-standard-and-derived-estimate",
+  "versionNote": "正式提交前按赛事要求核对采用年度电力因子版本，并在答辩材料中列出核算边界",
+  "factors": [
+    {"behaviorId":"walk","unit":"公里","baseUnit":"公里","factor":0.21,"source":"公开近似口径"},
+    {"behaviorId":"bike","unit":"公里","baseUnit":"公里","factor":0.175,"source":"公开近似口径"},
+    {"behaviorId":"transit","unit":"公里","baseUnit":"公里","factor":0.08,"source":"公开近似口径"},
+    {"behaviorId":"carpool","unit":"公里","baseUnit":"公里","factor":0.12,"source":"公开近似口径"},
+    {"behaviorId":"metro","unit":"公里","baseUnit":"公里","factor":0.10,"source":"公开近似口径"},
+    {"behaviorId":"electricity","unit":"千瓦时","baseUnit":"千瓦时","factor":0.58,"source":"公开近似电力排放因子"},
+    {"behaviorId":"water","unit":"升","baseUnit":"升","factor":0.0003,"source":"公开近似供水处理口径"},
+    {"behaviorId":"standby","unit":"次","baseUnit":"次","factor":0.18,"source":"公开近似节能行为口径"},
+    {"behaviorId":"shower","unit":"升","baseUnit":"升","factor":0.0003,"source":"公开近似供水处理口径"},
+    {"behaviorId":"meal","unit":"份","baseUnit":"份","factor":0.18,"source":"公开近似餐食浪费避免口径"},
+    {"behaviorId":"lowCarbonMeal","unit":"份","baseUnit":"份","factor":0.22,"source":"公开近似低碳餐食口径"},
+    {"behaviorId":"recycle","unit":"千克","baseUnit":"千克","factor":0.45,"source":"公开近似材料回收口径"},
+    {"behaviorId":"paperRecycle","unit":"千克","baseUnit":"千克","factor":0.52,"source":"公开近似纸张回收口径"},
+    {"behaviorId":"clothesRecycle","unit":"千克","baseUnit":"千克","factor":0.68,"source":"公开近似纺织品回收口径"},
+    {"behaviorId":"reuse","unit":"件","baseUnit":"件","factor":0.12,"source":"公开近似重复使用口径"},
+    {"behaviorId":"disposable","unit":"件","baseUnit":"件","factor":0.08,"source":"公开近似减少一次性用品口径"},
+    {"behaviorId":"shopping","unit":"件","baseUnit":"件","factor":0.06,"source":"公开近似绿色消费口径"},
+    {"behaviorId":"reusable","unit":"件","baseUnit":"件","factor":0.08,"source":"公开近似重复使用口径"},
+    {"behaviorId":"secondhand","unit":"件","baseUnit":"件","factor":0.20,"source":"公开近似二手流通口径"}
+  ]
+}

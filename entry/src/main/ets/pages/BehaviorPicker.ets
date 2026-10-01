@@ -68,6 +68,7 @@ export struct BehaviorPicker {
   /** 宽屏布局标记：仅平板/横向大窗口使用紧凑顶部操作栏，手机保持原布局。 */
   @State private wideLayout: boolean = false;
 
+  /** 组件即将出现：通过媒体查询判断是否处于宽屏（≥600vp）布局 */
   aboutToAppear(): void {
     this.wideLayout = this.getUIContext().getMediaQuery()
       .matchMediaSync('(width >= 600vp)').matches;

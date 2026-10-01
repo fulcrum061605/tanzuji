@@ -75,8 +75,11 @@ export class CarbonPointsService {
   private static readonly STATE_KEY: string = 'points_state';
   /** 核验记录每日入账积分上限 */
   private static readonly DAILY_RECORD_LIMIT: number = 30;
-  /** 每条核验记录的基础积分 */
-  private static readonly VERIFIED_RECORD_POINTS: number = 10;
+  /** 单位减排量对应积分；积分只对系统核验的减排量开放。 */
+  private static readonly POINTS_PER_KG: number = 20;
+  /** 单条核验记录积分上下限，避免大数值记录一次性刷满。 */
+  private static readonly MIN_RECORD_POINTS: number = 2;
+  private static readonly MAX_RECORD_POINTS: number = 20;
 
   /** 生成本地日期键（yyyy-MM-dd），用于签到去重与每日上限跨天重置 */
   private today(): string {
@@ -131,6 +134,15 @@ export class CarbonPointsService {
   }
 
   /**
+   * 整包恢复积分快照（备份恢复场景使用）
+   * @param context 应用上下文
+   * @param snapshot 备份中的积分快照
+   */
+  async restoreSnapshot(context: common.Context, snapshot: PointsSnapshot): Promise<void> {
+    await this.save(context, snapshot);
+  }
+
+  /**
    * 清洗并持久化积分快照后立即落盘
    * @param context 应用上下文
    * @param snapshot 待保存的快照
@@ -176,10 +188,17 @@ export class CarbonPointsService {
   /**
    * 记录一条通过定位或华为运动核验的行为。
    * 同一 operationId 只入账一次；每天最多 30 分，避免重复创建记录刷分。
+   * @param context 应用上下文
+   * @param operationId 本地记录操作号，入账去重依据
+   * @param verified 记录是否已通过系统核验
+   * @param scoreEnabled 记录是否允许计入积分
+   * @param evidenceSource 数量证据来源；manual 来源一律拦截
+   * @param reductionKg 本条记录的减排量（kg CO₂e），按 20 分/kg 折算并夹取单条上下限
+   * @returns 统一操作结果（是否成功、本次积分、最新余额与提示文案）
    */
   async rewardVerifiedRecord(context: common.Context, operationId: string,
     verified: boolean, scoreEnabled: boolean,
-    evidenceSource: 'location' | 'health' | 'manual' = 'manual'): Promise<PointsActionResult> {
+    evidenceSource: 'location' | 'health' | 'manual' = 'manual', reductionKg: number = 0): Promise<PointsActionResult> {
     const snapshot: PointsSnapshot = await this.load(context);
     // 只有系统定位或华为运动产生的证据可以入账；手动输入即使被调用方误标为
     // verified，也必须在服务层拦截，避免通过重复编辑或改写页面状态刷分。
@@ -194,7 +213,10 @@ export class CarbonPointsService {
       snapshot.recordDay = today;
       snapshot.recordDayPoints = 0;
     }
-    const points: number = Math.min(CarbonPointsService.VERIFIED_RECORD_POINTS,
+    const calculated: number = Math.max(CarbonPointsService.MIN_RECORD_POINTS,
+      Math.min(CarbonPointsService.MAX_RECORD_POINTS,
+        Math.round(Math.max(0, reductionKg) * CarbonPointsService.POINTS_PER_KG)));
+    const points: number = Math.min(calculated,
       CarbonPointsService.DAILY_RECORD_LIMIT - snapshot.recordDayPoints);
     snapshot.rewardedOperationIds = [...snapshot.rewardedOperationIds, operationId];
     if (points <= 0) {
