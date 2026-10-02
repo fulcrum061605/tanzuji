@@ -4,6 +4,8 @@
  */
 import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
+import { common } from '@kit.AbilityKit';
+import { systemShare } from '@kit.ShareKit';
 import { BehaviorOption } from './BehaviorPicker';
 import { RecordDraft } from './RecordDetail';
 import { CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
@@ -142,12 +144,24 @@ export struct DiaryDetail {
     return '数量来源：手动填写，待核实';
   }
 
-  /** 分享日记：当前为占位提示，分享能力将在后续版本接入 */
-  private share(): void {
+  /** 通过 HarmonyOS 系统分享面板分享当前日记文字。 */
+  private async share(): Promise<void> {
     try {
-      this.getUIContext().getPromptAction().showToast({ message: '分享功能将在后续接入', duration: 1600 });
+      const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const data: systemShare.SharedData = new systemShare.SharedData({
+        utd: 'general.text',
+        content: `${this.monthWeek()} ${this.time()}\n${this.content()}\n减排量：${this.draft.reductionKg.toFixed(3)} kg CO₂e`,
+        title: '碳记日记',
+        label: 'TEXT'
+      });
+      const controller: systemShare.ShareController = new systemShare.ShareController(data);
+      await controller.show(context, {});
     } catch (err) {
-      // 提示失败不影响日记阅读。
+      try {
+        this.getUIContext().getPromptAction().showToast({ message: '暂时无法打开系统分享面板', duration: 1600 });
+      } catch (toastError) {
+        // 分享失败不影响日记阅读。
+      }
     }
   }
 
@@ -176,7 +190,7 @@ export struct DiaryDetail {
 
       // 右侧操作组：分享与删除
       Row({ space: 20 }) {
-        // 分享按钮：当前为占位提示
+        // 分享按钮：调用 HarmonyOS 系统分享面板
         Button({ type: ButtonType.Normal, stateEffect: false }) {
           Image($r('app.media.diary_share'))
             .syncLoad(true)
@@ -250,6 +264,15 @@ export struct DiaryDetail {
         .fontColor('#174E3A')
         .lineHeight(34)
         .textAlign(TextAlign.Start)
+
+      if (this.draft.photoUri !== undefined && this.draft.photoUri.length > 0) {
+        Image(this.draft.photoUri)
+          .width('100%')
+          .height(220)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(14)
+          .accessibilityText('日记配图')
+      }
 
       // 元信息区：记录位置、字数与核验状态三行
       Column({ space: 16 }) {

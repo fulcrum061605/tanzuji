@@ -32,7 +32,9 @@ export struct MyPage {
   @Prop selectedTab: string = '我的';
   /** 切换底部栏目回调：参数为目标栏目名，由入口页完成页面切换 */
   onNavigate?: (tab: string) => void;
+  /** 从入口页传入的全部已保存记录：备份、恢复与 CSV 报表使用 */
   @Prop savedDrafts: RecordDraft[] = [];
+  /** 恢复备份后回传记录列表，由入口页更新数据并落盘 */
   onRestoreRecords?: (records: RecordDraft[]) => void;
   /** 全部文章列表：用于渲染收藏项与详情 */
   @State private articles: KnowledgeArticle[] = [];
@@ -42,7 +44,9 @@ export struct MyPage {
   @State private showingFavorites: boolean = false;
   /** 是否显示积分与模拟权益中心 */
   @State private showingRewards: boolean = false;
+  /** 是否显示数据管理视图 */
   @State private showingDataManagement: boolean = false;
+  /** 最近一次导出的 CSV 报表内容；空串时不显示预览区 */
   @State private csvPreview: string = '';
   /** 当前打开的收藏文章 id：非空时进入文章详情视图 */
   @State private openedArticleId: string = '';
@@ -66,6 +70,7 @@ export struct MyPage {
   private service: KnowledgeService = new KnowledgeService();
   /** 本地积分服务：负责签到、核验入账与权益兑换的持久化 */
   private pointsService: CarbonPointsService = new CarbonPointsService();
+  /** 本地备份服务：负责备份、恢复与 CSV 报表 */
   private backupService: BackupService = new BackupService();
 
   /** 可兑换的模拟权益清单：仅用于演示，兑换结果只保存在本机 */
@@ -181,6 +186,10 @@ export struct MyPage {
     }
   }
 
+  /**
+   * 备份当前全部本地数据（记录 + 积分 + 收藏）
+   * 成功与失败均以 Toast 提示
+   */
   private async backupRecords(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -192,6 +201,10 @@ export struct MyPage {
     }
   }
 
+  /**
+   * 读取最近一次备份并恢复记录、积分与收藏
+   * 备份中有记录时先经回调交给入口页更新列表，再持久化积分与收藏
+   */
   private async restoreRecords(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -208,6 +221,10 @@ export struct MyPage {
     }
   }
 
+  /**
+   * 生成 CSV 报表并在页面下方预览
+   * 报表内容同时保存在本机，供重复查看
+   */
   private async exportCsvReport(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -606,6 +623,10 @@ export struct MyPage {
     .backgroundColor('#F7F8F2')
   }
 
+  /**
+   * 数据管理视图
+   * 顶部标题行（返回） + 本地记录工具：备份、恢复与 CSV 报表生成及预览
+   */
   @Builder
   private DataManagement() {
     Column() {
@@ -1065,6 +1086,7 @@ export struct MyPage {
             this.MenuRow('成长知识库', '双碳基础与校园低碳实践', $r('app.media.diary_sprout'), () => {
               this.navigate('成长');
             })
+            // 菜单入口：数据管理（本机备份/恢复/CSV 报表）
             this.MenuRow('数据管理', '备份、恢复与导出 CSV 报表', $r('app.media.diary_leaf'), () => {
               this.showingDataManagement = true;
             })

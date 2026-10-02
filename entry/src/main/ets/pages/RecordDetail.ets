@@ -2,13 +2,14 @@
  * 碳记 · 记录详情（2026-09-29 确认稿）
  * 新建日记的第二步：从行为选择页（BehaviorPicker）带入低碳行为，在此填写数量、
  * 查看即时减排估算，并可补充文字与图片，最后保存为一条记录草稿（RecordDraft）。
- * 当前为纯 UI 阶段：图片用内置示例图模拟（hasPhoto 布尔切换，接入相机/相册后替换），
+ * 图片通过系统相册 PhotoViewPicker 选择并保存用户授权的 URI，
  * 减排系数是公开数据的近似简化值，仅供记录参考；保存结果经 onSave 回调交给父组件，
  * 入口页目前仅返回首页，草稿数据待接入本地存储后启用。
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览；文末提供独立 @Preview 预览入口。
  */
 import { BehaviorOption } from './BehaviorPicker';
 import { common } from '@kit.AbilityKit';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenceService';
 import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
 
@@ -35,9 +36,9 @@ export interface RecordDraft {
   reductionKg: number;
   /** 补充日记文字，可为空串 */
   note: string;
-  /** 是否携带图片：当前为模拟标志，接入相机后替换为真实图片信息 */
+  /** 是否携带真实相册图片；保存时由 photoUri 是否为空统一决定。 */
   hasPhoto: boolean;
-  /** 用户图片 URI；当前未接入相册时为空字符串。 */
+  /** 用户从系统相册选择的持久化图片 URI。 */
   photoUri?: string;
   /** 数量来源：系统定位、华为运动或手动待核实。 */
   evidenceSource: EvidenceSource;
@@ -97,8 +98,10 @@ export struct RecordDetail {
   @State private selectedUnit: string = '公里';
   /** 补充日记文字：与文本域双向同步，限长 200 字 */
   @State private note: string = '';
-  /** 是否携带图片：当前用内置示例图模拟，删除后可通过"添加图片"恢复 */
-  @State private hasPhoto: boolean = true;
+  /** 是否携带用户从系统相册选择的图片。 */
+  @State private hasPhoto: boolean = false;
+  /** 系统相册返回的持久化图片 URI。 */
+  @State private photoUri: string = '';
   /** 数量输入框是否聚焦：驱动输入卡片描边加深变绿的编辑反馈 */
   @State private focusedAmount: boolean = false;
   /** 核验状态：verified 已核验 / pending 待核实；只有 verified 计入正式碳积分 */
@@ -134,6 +137,7 @@ export struct RecordDetail {
       this.selectedUnit = this.initialDraft.unit;
       this.note = this.initialDraft.note;
       this.hasPhoto = this.initialDraft.hasPhoto;
+      this.photoUri = this.initialDraft.photoUri ?? '';
       this.evidenceSource = this.initialDraft.evidenceSource;
       this.verificationStatus = this.initialDraft.verificationStatus;
       this.evidenceId = this.initialDraft.evidenceId;
@@ -304,8 +308,8 @@ export struct RecordDetail {
       unit: this.selectedUnit,
       reductionKg: this.reduction(),
       note: this.note,
-      hasPhoto: this.hasPhoto,
-      photoUri: this.initialDraft?.photoUri ?? '',
+      hasPhoto: this.photoUri.length > 0,
+      photoUri: this.photoUri,
       evidenceSource: evidenceSource,
       verificationStatus: verificationStatus,
       evidenceId: this.evidenceId,
@@ -386,6 +390,32 @@ export struct RecordDetail {
       this.verificationStatus = 'pending';
       this.evidenceSource = 'manual';
       this.measurementMessage = '华为运动数据暂不可用，本次记录将标记为待核实';
+    }
+  }
+
+  /**
+   * 打开系统相册选择一张图片，并保存系统授予的持久化 URI。
+   * PhotoViewPicker 由系统处理权限，不在应用内自行申请图库读权限。
+   */
+  private async choosePhoto(): Promise<void> {
+    try {
+      const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
+      const result: photoAccessHelper.PhotoSelectResult = await picker.select({
+        MIMEType: photoAccessHelper.PhotoViewMIMETypes.IMAGE_TYPE,
+        maxSelectNumber: 1,
+        isPhotoTakingSupported: true
+      });
+      const uri: string | undefined = result.photoUris.length > 0 ? result.photoUris[0] : undefined;
+      if (uri !== undefined && uri.length > 0) {
+        this.photoUri = uri;
+        this.hasPhoto = true;
+      }
+    } catch (error) {
+      try {
+        this.getUIContext().getPromptAction().showToast({ message: '未能打开相册，请稍后重试', duration: 1600 });
+      } catch (toastError) {
+        // 系统相册取消或不可用时，不影响其他记录内容。
+      }
     }
   }
 
@@ -651,8 +681,7 @@ export struct RecordDetail {
   }
 
   /**
-   * 补充日记卡片：标题 + 限长文本域（右下角字数统计）+ 示例图片与添加/删除
-   * 图片当前为内置示例图模拟（hasPhoto 布尔切换），接入相机/相册后替换为真实照片
+   * 补充日记卡片：标题 + 限长文本域（右下角字数统计）+ 系统相册图片
    */
   @Builder
   private NoteCard() {
@@ -687,13 +716,12 @@ export struct RecordDetail {
           .margin({ right: 18, bottom: 12 })
       }
 
-      // 图片区：已有图片时显示示例缩略图（带删除角标），右侧按钮切换 hasPhoto
+      // 图片区：已有图片时显示用户从系统相册选择的缩略图
       Row({ space: 26 }) {
-        if (this.hasPhoto) {
+        if (this.hasPhoto && this.photoUri.length > 0) {
           // Stack 顶右对齐：删除角标叠在缩略图右上角
           Stack({ alignContent: Alignment.TopEnd }) {
-            // 示例缩略图：当前为内置素材，接入相机后替换为用户照片
-            Image($r('app.media.diary_campus'))
+            Image(this.photoUri)
               .syncLoad(true)
               .width(70)
               .height(58)
@@ -708,7 +736,10 @@ export struct RecordDetail {
               .backgroundColor('#7D837F')
               .padding(0)
               .margin({ top: 3, right: 3 })
-              .onClick(() => { this.hasPhoto = false; })
+              .onClick(() => {
+                this.hasPhoto = false;
+                this.photoUri = '';
+              })
               .accessibilityText('删除图片')
           }
         }
@@ -735,7 +766,7 @@ export struct RecordDetail {
         .height(58)
         .padding(0)
         .backgroundColor(Color.Transparent)
-        .onClick(() => { this.hasPhoto = true; })
+        .onClick(() => { this.choosePhoto(); })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)

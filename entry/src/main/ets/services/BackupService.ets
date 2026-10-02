@@ -5,6 +5,7 @@
  */
 import { common } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
+import { picker, fileIo } from '@kit.CoreFileKit';
 import { RecordDraft } from '../pages/RecordDetail';
 import { PointsSnapshot } from './CarbonPointsService';
 
@@ -22,7 +23,7 @@ export interface BackupPayload {
   favoriteIds: string[];
 }
 
-/** 本地备份与报表服务。备份不上传网络，CSV 同时保存为最近一次导出内容。 */
+  /** 本地备份与报表服务。备份不上传网络，CSV 同时保存为最近一次导出内容。 */
 export class BackupService {
   /** Preferences 存储库名 */
   private static readonly STORE_NAME: string = 'tanji_backup_v1';
@@ -83,14 +84,14 @@ export class BackupService {
   }
 
   /**
-   * 将全部日记记录导出为 CSV 报表并保存为最近一次导出
+   * 将全部日记记录导出为 CSV 报表，保存为最近一次导出并通过系统文档选择器写入用户指定位置。
    * 单元格统一用双引号包裹，内部引号转义、换行替换为空格，保证表格可读
    * @param context 应用上下文
    * @param records 全部日记记录
-   * @returns CSV 文本内容
+   * @returns CSV 文本内容；用户取消保存时仍返回预览文本
    */
   async exportCsv(context: common.Context, records: RecordDraft[]): Promise<string> {
-    const rows: string[] = ['recordId,recordedAt,behavior,amount,unit,reductionKg,verificationStatus,evidenceSource,note'];
+    const rows: string[] = ['recordId,recordedAt,behavior,amount,unit,reductionKg,verificationStatus,evidenceSource,photoUri,note'];
     records.forEach((record: RecordDraft): void => {
       const cells: string[] = [
         record.recordId ?? record.operationId ?? '',
@@ -101,6 +102,7 @@ export class BackupService {
         record.reductionKg.toFixed(3),
         record.verificationStatus,
         record.evidenceSource,
+        record.photoUri ?? '',
         record.note.replace(/"/g, '""').replace(/\n/g, ' ')
       ];
       rows.push(cells.map((cell: string): string => `"${cell}"`).join(','));
@@ -109,7 +111,31 @@ export class BackupService {
     const store: preferences.Preferences = await preferences.getPreferences(context, { name: BackupService.STORE_NAME });
     await store.put(BackupService.CSV_KEY, csv);
     await store.flush();
+
+    try {
+      // 让用户选择文件名与保存位置，再通过系统 URI 写入 CSV，不依赖应用沙箱路径。
+      const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
+      const uris: Array<string> = await documentPicker.save({
+        newFileNames: [`tanji-carbon-report-${this.fileDate(new Date())}`],
+        fileSuffixChoices: ['CSV|.csv']
+      });
+      if (uris.length > 0 && uris[0].length > 0) {
+        const file = await fileIo.open(uris[0], fileIo.OpenMode.WRITE_ONLY | fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
+        try {
+          await fileIo.write(file.fd, csv);
+        } finally {
+          await fileIo.close(file);
+        }
+      }
+    } catch (error) {
+      // 用户取消选择位置时保留报表预览，不影响本地 CSV 内容生成。
+    }
     return csv;
+  }
+
+  /** 文件名中的日期部分，避免出现系统不允许的路径字符。 */
+  private fileDate(date: Date): string {
+    return `${date.getFullYear()}${(date.getMonth() + 1).toString().padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}`;
   }
 
   /**

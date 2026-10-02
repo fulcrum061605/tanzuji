@@ -66,8 +66,9 @@ export class DiaryStorageService {
       unit: value.unit ?? '',
       reductionKg: Math.max(0, Number(value.reductionKg) || 0),
       note: typeof value.note === 'string' ? value.note : '',
-      hasPhoto: value.hasPhoto === true,
-      photoUri: value.photoUri ?? '',
+      // 图片状态只由真实相册 URI 决定，避免历史的模拟 hasPhoto 标志再次显示假图片。
+      hasPhoto: typeof value.photoUri === 'string' && value.photoUri.length > 0,
+      photoUri: typeof value.photoUri === 'string' ? value.photoUri : '',
       evidenceSource: value.evidenceSource ?? 'manual',
       verificationStatus: value.verificationStatus === 'verified' ? 'verified' : 'pending',
       evidenceId: value.evidenceId ?? '',

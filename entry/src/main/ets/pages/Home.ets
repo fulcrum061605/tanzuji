@@ -1,6 +1,6 @@
 /**
  * 碳记 · 日记首页（2026-09-27 确认稿）
- * 当前只完成首页 UI。三条记录、日期和减排值是独立示例数据，不写入真实账本。
+ * 首页同时展示本地持久化记录与明确标注的演示数据；演示数据不进入真实统计。
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览。
  * 小体积本地素材同步加载，确保组件静态预览首帧完整；未来用户照片应改回异步加载。
  * 下一步接入真实数据时替换 diaryEntries 和概览；通过回调连接录入、日期、搜索和其他栏目。
@@ -38,6 +38,8 @@ interface DiaryEntry {
   icon: Resource;
   /** 可选配图资源：存在时以缩略图形式显示在条目右侧 */
   photo?: Resource;
+  /** 用户从系统相册选择的图片 URI。 */
+  photoUri?: string;
   /** 该条记录的估算减排量，用于首页概览汇总 */
   reductionKg: number;
   /** 记录是否通过定位或华为运动核验。 */
@@ -95,7 +97,7 @@ const DIARY_EXAMPLES: DiaryEntry[] = [
 /**
  * 日记首页组件
  * 页面结构：顶部栏（日期/日历/搜索/今日概览） + 日记列表 + 底部悬浮操作区（加号与四栏导航）。
- * 页面事件通过回调交给入口管理；本轮未接入的页面只显示提示。
+ * 页面事件通过回调交给入口管理，日期、搜索、新建与栏目切换均可实际操作。
  */
 @Component
 export struct Home {
@@ -105,6 +107,8 @@ export struct Home {
   @Prop hiddenExampleIds: string[] = [];
   /** 从入口页传入的真实保存记录；每次保存后由 @State 触发首页刷新。 */
   @Prop savedDrafts: RecordDraft[] = [];
+  /** 当前日历筛选日期的时间戳。 */
+  @Prop selectedDate: number = Date.now();
   /** 点击首页日记条目，由入口页打开对应的详情页。 */
   onOpenDiary?: (id: string) => void;
   /** 新建低碳日记回调：由父组件注入，未注入时点击加号显示占位提示 */
@@ -181,7 +185,7 @@ export struct Home {
           ? `${draft.behavior.name} · ${draft.amount}${draft.unit} · 已核验`
           : `${draft.behavior.name} · 待核实`,
         icon: draft.behavior.icon,
-        photo: draft.hasPhoto ? $r('app.media.diary_campus') : undefined,
+        photoUri: draft.photoUri,
         reductionKg: draft.reductionKg,
         verificationStatus: draft.verificationStatus,
         scoreEnabled: draft.scoreEnabled && draft.verificationStatus === 'verified',
@@ -196,7 +200,9 @@ export struct Home {
 
   /** 首页顶部概览使用当前列表中的真实记录数量与减排量。 */
   private entryCount(): number {
-    return this.savedDrafts.length;
+    return this.savedDrafts.filter((draft: RecordDraft): boolean => {
+      return this.sameDay(draft.recordedAt ?? draft.createdAt ?? Date.now(), this.selectedDate);
+    }).length;
   }
 
   /**
@@ -208,16 +214,35 @@ export struct Home {
   private filteredEntries(): DiaryEntry[] {
     // 去除关键字首尾空白与内部空格，避免误过滤
     const keyword: string = this.searchText.trim().toLowerCase().replace(/\s/g, '');
-    // 关键字为空：返回合并后的全量列表
+    const dateEntries: DiaryEntry[] = this.combinedEntries().filter((entry: DiaryEntry): boolean => {
+      // 没有时间戳的内置演示记录只在今天显示，避免切换历史日期时混入示例。
+      return entry.recordedAt === undefined
+        ? this.sameDay(Date.now(), this.selectedDate)
+        : this.sameDay(entry.recordedAt, this.selectedDate);
+    });
+    // 关键字为空：返回当前日期的记录
     if (keyword.length === 0) {
-      return this.combinedEntries();
+      return dateEntries;
     }
     // 按可检索字段（时间+标题+正文+标签）做包含匹配
-    return this.combinedEntries().filter((entry: DiaryEntry): boolean => {
+    return dateEntries.filter((entry: DiaryEntry): boolean => {
       const searchable: string = `${entry.time}${entry.title}${entry.content}${entry.label}`
         .toLowerCase().replace(/\s/g, '');
       return searchable.includes(keyword);
     });
+  }
+
+  /** 判断两个时间戳是否属于同一自然日。 */
+  private sameDay(leftTimestamp: number, rightTimestamp: number): boolean {
+    const left: Date = new Date(leftTimestamp);
+    const right: Date = new Date(rightTimestamp);
+    return left.getFullYear() === right.getFullYear() &&
+      left.getMonth() === right.getMonth() && left.getDate() === right.getDate();
+  }
+
+  /** 当前筛选日期是否为系统今天。 */
+  private isTodaySelected(): boolean {
+    return this.sameDay(Date.now(), this.selectedDate);
   }
 
   /**
@@ -228,7 +253,8 @@ export struct Home {
   private reductionTotal(): string {
     let total: number = 0;
     this.savedDrafts.forEach((draft: RecordDraft): void => {
-      if (draft.scoreEnabled && draft.verificationStatus === 'verified') {
+      if (draft.scoreEnabled && draft.verificationStatus === 'verified' &&
+        this.sameDay(draft.recordedAt ?? draft.createdAt ?? Date.now(), this.selectedDate)) {
         total += draft.reductionKg;
       }
     });
@@ -400,7 +426,7 @@ export struct Home {
       Button({ type: ButtonType.Normal }) {
         Row({ space: 7 }) {
           // 当前选中日期
-          Text(this.formatDate(Date.now()))
+          Text(this.formatDate(this.selectedDate))
             .fontSize(20)
             .fontWeight(FontWeight.Bold)
             .fontColor('#123D2D')
@@ -415,7 +441,7 @@ export struct Home {
       .padding({ left: 12, right: 12 })
       .backgroundColor(Color.Transparent)
       .borderRadius(16)
-      .accessibilityText(`${this.formatDate(Date.now())}，展开日历`)
+      .accessibilityText(`${this.formatDate(this.selectedDate)}，展开日历`)
       .onClick(() => this.openCalendar())
     }
     .width('100%')
@@ -424,7 +450,7 @@ export struct Home {
 
     // 今日减排概览：富文本拼接"记录数 + 估算减排量"，数值部分加深加粗
     Text() {
-      Span(`今天 ${this.entryCount()} 条记录 · 估算减排 `)
+      Span(`${this.isTodaySelected() ? '今天' : this.formatDate(this.selectedDate)} ${this.entryCount()} 条记录 · 估算减排 `)
         .fontColor('#738078')
       Span(`${this.reductionTotal()} kg`)
         .fontColor('#163D2F')
@@ -544,6 +570,17 @@ export struct Home {
           .borderRadius(10)
           .margin({ left: 0 })
           .accessibilityText('阳光穿过校园道路两旁的树叶')
+      }
+      if (entry.photoUri !== undefined && entry.photoUri.length > 0) {
+        Image(entry.photoUri)
+          .syncLoad(true)
+          .width('26%')
+          .constraintSize({ maxWidth: 440 })
+          .aspectRatio(0.86)
+          .objectFit(ImageFit.Cover)
+          .borderRadius(10)
+          .margin({ left: 0 })
+          .accessibilityText('日记配图')
       }
     }
     .alignItems(VerticalAlign.Top)

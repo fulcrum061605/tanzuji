@@ -52,6 +52,8 @@ struct Index {
   @State private editingSavedIndex: number = -1;
   /** 当前底部栏目；“我的”由独立页面承载，其余栏目仍在 Home 中显示。 */
   @State private activeTab: string = '日记';
+  /** 首页当前筛选的自然日，默认今天。 */
+  @State private selectedDate: number = Date.now();
   /** 已从首页删除的示例记录，避免静态样例再次出现。 */
   @State private hiddenPreviewIds: string[] = [];
   /** 本地积分服务：真实保存的核验记录才会入账，示例数据不会自动产生积分。 */
@@ -75,6 +77,16 @@ struct Index {
     } catch (error) {
       this.savedDrafts = [];
     }
+  }
+
+  /** 打开系统日期选择器，选择后由首页按自然日筛选记录。 */
+  private openCalendar(): void {
+    this.getUIContext().showDatePickerDialog({
+      selected: new Date(this.selectedDate),
+      onDateAccept: (date: Date): void => {
+        this.selectedDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+      }
+    });
   }
 
   /** 保存成功后为核验记录入账，去重和每日上限由服务层统一执行。 */
@@ -276,10 +288,12 @@ struct Index {
           initialTab: this.activeTab,
           hiddenExampleIds: this.hiddenPreviewIds,
           savedDrafts: this.savedDrafts,
+          selectedDate: this.selectedDate,
           onOpenDiary: (id: string) => this.openDiary(id),
           onAddDiary: () => {
             this.pickingBehavior = true;
           },
+          onOpenCalendar: () => this.openCalendar(),
           onSelectTab: (tab: string) => {
             this.activeTab = tab;
           }
