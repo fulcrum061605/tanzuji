@@ -12,14 +12,14 @@
         "name": "default",
         // 签名类型：HarmonyOS 应用签名
         "type": "HarmonyOS",
-        // 签名材料：证书、密钥与密码等（本机自动生成的调试材料，勿提交版本库）
+        // 签名材料：证书、密钥与密码等（调试材料已随工程存于 signing/ 目录，相对路径跨机器可用；勿提交版本库）
         "material": {
-          "certpath": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.cer",
+          "certpath": "signing/tanzuji_debug.cer",
           "keyAlias": "debugKey",
           "keyPassword": "0000001A9029F52C91A084613C7C1E5B45058F8BB846156F0D77C706A622EA36A2F6C8B72B8C939EBF1B",
-          "profile": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.p7b",
+          "profile": "signing/tanzuji_debug.p7b",
           "signAlg": "SHA256withECDSA",
-          "storeFile": "C:\\Users\\甘\\.ohos\\config\\default_tanzuji_rpT6Tj8D59ykLndD8mn-99RfmWGGXJIs16SCO_slX1Q=.p12",
+          "storeFile": "signing/tanzuji_debug.p12",
           "storePassword": "0000001A429CC4EFAF5423133EEB88C8BFF7A25E9C25A79EDF1C9BEB654479F1EB80E8AF1DC6AC330FB2"
         }
       }

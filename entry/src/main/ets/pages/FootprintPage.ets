@@ -64,101 +64,10 @@ interface FootprintData {
 /** 时间口径切换选项：日 / 周 / 月 / 年 */
 const PERIODS: string[] = ['日', '周', '月', '年'];
 
-/** 日口径静态示例数据：按 6 个时段展示当日减排节奏 */
-const DAY_DATA: FootprintData = {
-  total: 1.36,
-  goal: 2,
-  comparison: '较昨日多 18%',
-  trendTitle: '今日减排节奏',
-  trend: [
-    { label: '6时', value: 0.08 }, { label: '9时', value: 0.32 }, { label: '12时', value: 0.18 },
-    { label: '15时', value: 0.12 }, { label: '18时', value: 0.46 }, { label: '21时', value: 0.20 }
-  ],
-  categories: [
-    { name: '绿色出行', value: 0.71, color: '#3E8E68', icon: $r('app.media.diary_bike') },
-    { name: '低碳饮食', value: 0.28, color: '#D4A24C', icon: $r('app.media.diary_meal') },
-    { name: '节能用电', value: 0.22, color: '#4F8FA5', icon: $r('app.media.diary_electricity') },
-    { name: '循环利用', value: 0.15, color: '#7A9270', icon: $r('app.media.diary_recycle') }
-  ],
-  verifiedCount: 4,
-  totalCount: 5,
-  treeEquivalent: '0.06 棵树一天吸收量',
-  travelEquivalent: '少开燃油车约 5.4 km'
-};
-
-/** 周口径静态示例数据：周一至周日每日减排 */
-const WEEK_DATA: FootprintData = {
-  total: 8.64,
-  goal: 10,
-  comparison: '较上周多 12%',
-  trendTitle: '本周每日减排',
-  trend: [
-    { label: '一', value: 0.82 }, { label: '二', value: 1.15 }, { label: '三', value: 0.94 },
-    { label: '四', value: 1.42 }, { label: '五', value: 1.08 }, { label: '六', value: 1.71 },
-    { label: '日', value: 1.52 }
-  ],
-  categories: [
-    { name: '绿色出行', value: 4.12, color: '#3E8E68', icon: $r('app.media.diary_transit') },
-    { name: '低碳饮食', value: 1.86, color: '#D4A24C', icon: $r('app.media.diary_meal') },
-    { name: '节水节电', value: 1.54, color: '#4F8FA5', icon: $r('app.media.diary_water') },
-    { name: '循环利用', value: 1.12, color: '#7A9270', icon: $r('app.media.diary_reuse') }
-  ],
-  verifiedCount: 19,
-  totalCount: 22,
-  treeEquivalent: '0.39 棵树一月吸收量',
-  travelEquivalent: '少开燃油车约 34.6 km'
-};
-
-/** 月口径静态示例数据：按周汇总本月减排 */
-const MONTH_DATA: FootprintData = {
-  total: 34.72,
-  goal: 40,
-  comparison: '较上月多 9%',
-  trendTitle: '本月每周减排',
-  trend: [
-    { label: '第1周', value: 7.12 }, { label: '第2周', value: 8.64 },
-    { label: '第3周', value: 10.28 }, { label: '第4周', value: 8.68 }
-  ],
-  categories: [
-    { name: '绿色出行', value: 17.26, color: '#3E8E68', icon: $r('app.media.diary_bike') },
-    { name: '低碳饮食', value: 7.34, color: '#D4A24C', icon: $r('app.media.diary_meal') },
-    { name: '节水节电', value: 6.18, color: '#4F8FA5', icon: $r('app.media.diary_electricity') },
-    { name: '循环利用', value: 3.94, color: '#7A9270', icon: $r('app.media.diary_recycle') }
-  ],
-  verifiedCount: 73,
-  totalCount: 81,
-  treeEquivalent: '1.58 棵树一月吸收量',
-  travelEquivalent: '少开燃油车约 138.9 km'
-};
-
-/** 年口径静态示例数据：按月汇总全年减排 */
-const YEAR_DATA: FootprintData = {
-  total: 386.40,
-  goal: 480,
-  comparison: '较去年同期多 21%',
-  trendTitle: '年度减排趋势',
-  trend: [
-    { label: '1月', value: 24.2 }, { label: '2月', value: 27.5 }, { label: '3月', value: 31.8 },
-    { label: '4月', value: 29.4 }, { label: '5月', value: 34.7 }, { label: '6月', value: 38.1 },
-    { label: '7月', value: 36.8 }, { label: '8月', value: 33.2 }, { label: '9月', value: 42.6 },
-    { label: '10月', value: 35.9 }, { label: '11月', value: 28.4 }, { label: '12月', value: 23.8 }
-  ],
-  categories: [
-    { name: '绿色出行', value: 196.80, color: '#3E8E68', icon: $r('app.media.diary_transit') },
-    { name: '低碳饮食', value: 76.42, color: '#D4A24C', icon: $r('app.media.diary_meal') },
-    { name: '节水节电', value: 69.36, color: '#4F8FA5', icon: $r('app.media.diary_water') },
-    { name: '循环利用', value: 43.82, color: '#7A9270', icon: $r('app.media.diary_reuse') }
-  ],
-  verifiedCount: 786,
-  totalCount: 842,
-  treeEquivalent: '17.56 棵树一年吸收量',
-  travelEquivalent: '少开燃油车约 1545.6 km'
-};
-
 /**
  * 足迹看板组件
  * 页面结构：标题栏 + 时间口径切换 + 减排概览（环形进度） + 时序柱状图 + 行为构成 + 核验与等效 + 底部导航。
- * 看板基线为静态示例数据，当前会话中已核验的新记录会实时叠加进汇总。
+ * 看板数据全部由本地已核验记录按所选时间口径动态聚合，无静态示例基线。
  */
 @Component
 export struct FootprintPage {
@@ -279,11 +188,6 @@ export struct FootprintPage {
       groups[index].value += draft.reductionKg;
     });
     return groups.filter((item: CategoryPoint): boolean => item.value > 0);
-  }
-
-  /** 当前会话中新建且通过系统核验的记录才进入正式减排量。 */
-  private verifiedDraftTotal(): number {
-    return this.data().total;
   }
 
   /**

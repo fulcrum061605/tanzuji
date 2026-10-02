@@ -115,7 +115,7 @@ export class BackupService {
     try {
       // 让用户选择文件名与保存位置，再通过系统 URI 写入 CSV，不依赖应用沙箱路径。
       const documentPicker: picker.DocumentViewPicker = new picker.DocumentViewPicker(context);
-      const uris: Array<string> = await documentPicker.save({
+      const uris: string[] = await documentPicker.save({
         newFileNames: [`tanji-carbon-report-${this.fileDate(new Date())}`],
         fileSuffixChoices: ['CSV|.csv']
       });

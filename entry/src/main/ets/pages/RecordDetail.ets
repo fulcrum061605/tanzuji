@@ -205,16 +205,6 @@ export struct RecordDetail {
   }
 
   /**
-   * 行为减排系数（kg CO₂e / 主单位数量）
-   * 取公开碳排放数据的近似简化值，仅用于记录参考，不作为核算依据；
-   * 正式版本应替换为审定的排放因子并注明口径。
-   * @returns 当前行为的减排系数
-   */
-  private factor(): number {
-    return this.factorService.getByBehavior(this.behavior.id)?.factor ?? 0;
-  }
-
-  /**
    * 解析输入的数量
    * 空串、非数字或负数一律按 0 处理，保证估算与按钮状态不出现 NaN/负值
    * @returns 解析后的数量，非法输入返回 0
@@ -232,7 +222,6 @@ export struct RecordDetail {
   private reduction(): number {
     // 查找所选单位的换算系数；异常时按主单位（1）兜底，保证计算不中断
     const unit: UnitOption | undefined = this.units().find((item: UnitOption) => item.name === this.selectedUnit);
-    const baseAmount: number = this.amount() * (unit?.toBase ?? 1);
     return this.factorService.calculate(this.behavior.id, this.amount(), this.selectedUnit,
       unit?.toBase ?? 1);
   }
