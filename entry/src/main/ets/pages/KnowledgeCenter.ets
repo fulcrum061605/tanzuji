@@ -148,7 +148,8 @@ export struct KnowledgeCenter {
             .fontWeight(FontWeight.Bold)
             .fontColor('#123F2E')
           Blank()
-          Text('根据你的低碳记录')
+          // 推荐理由与事实保持一致：尚无低碳记录时说明是入门推荐
+          Text(this.savedDrafts.length > 0 ? '根据你的低碳记录' : '为你挑选的入门内容')
             .fontSize(11)
             .fontColor('#7B8B82')
         }
@@ -292,48 +293,41 @@ export struct KnowledgeCenter {
   }
 
   /**
-   * 搜索头部：居中标题"成长" + 底行（副标题/管理员入口/文章数） + 搜索框
+   * 搜索头部：标题行（页面标题/管理员入口/文章数） + 搜索框
    */
   @Builder
   private SearchHeader() {
     Column({ space: 12 }) {
-      // Stack 叠加：底层为副标题与操作行，上层为居中的页面标题
-      Stack({ alignContent: Alignment.Center }) {
-        Text('成长')
-          .fontSize(22)
+      // 顶行：左侧页面标题 + 右侧管理员入口与文章总数（底部导航已标明"成长"栏目，页内不再重复）
+      Row() {
+        Text('低碳知识与行动')
+          .fontSize(19)
           .fontWeight(FontWeight.Bold)
           .fontColor('#123F2E')
-        Row() {
-          // 左侧功能提示，避免与“成长”栏目标题重复
-          Text('低碳知识与行动')
-            .fontSize(14)
-            .fontColor('#718078')
-          Blank()
-          // 管理员模式：显示新增文档按钮，点击展开/收起编辑器
-          if (this.adminMode) {
-            Button({ type: ButtonType.Circle, stateEffect: false }) {
-              Image($r('app.media.diary_pen'))
-                .syncLoad(true)
-                .width(19)
-                .height(19)
-            }
-            .width(34)
-            .height(34)
-            .padding(7)
-            .backgroundColor(this.showingEditor ? '#CFE5D5' : '#EDF3EA')
-            .accessibilityText('管理员新增文档')
-            .onClick((): void => {
-              this.showingEditor = !this.showingEditor;
-            })
+        Blank()
+        // 管理员模式：显示新增文档按钮，点击展开/收起编辑器
+        if (this.adminMode) {
+          Button({ type: ButtonType.Circle, stateEffect: false }) {
+            Image($r('app.media.diary_pen'))
+              .syncLoad(true)
+              .width(19)
+              .height(19)
           }
-          // 右侧文章总数
-          Text(`${this.articles.length} 篇`)
-            .fontSize(14)
-            .fontColor('#718078')
+          .width(34)
+          .height(34)
+          .padding(7)
+          .backgroundColor(this.showingEditor ? '#CFE5D5' : '#EDF3EA')
+          .accessibilityText('管理员新增文档')
+          .onClick((): void => {
+            this.showingEditor = !this.showingEditor;
+          })
         }
-        .width('100%')
+        // 右侧文章总数
+        Text(`${this.articles.length} 篇`)
+          .fontSize(14)
+          .fontColor('#718078')
       }
-      .height(48)
+      .width('100%')
 
       // 搜索框：搜索图标 + 输入框，关键字变化实时刷新列表
       Row({ space: 9 }) {
@@ -567,11 +561,12 @@ export struct KnowledgeCenter {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
 
-      // 右侧：收藏按钮，♥/♡ 切换收藏状态
+      // 右侧：收藏按钮，心形图标切换收藏状态
       Button({ type: ButtonType.Circle, stateEffect: false }) {
-        Text(this.isFavorite(article.id) ? '♥' : '♡')
-          .fontSize(24)
-          .fontColor(this.isFavorite(article.id) ? '#4C9576' : '#8A968F')
+        Image(this.isFavorite(article.id) ? $r('app.media.diary_heart_filled') : $r('app.media.diary_heart'))
+          .syncLoad(true)
+          .width(24)
+          .height(24)
       }
       .width(40)
       .height(40)
@@ -671,9 +666,10 @@ export struct KnowledgeCenter {
           Blank()
           // 收藏按钮：与列表行一致
           Button({ type: ButtonType.Circle, stateEffect: false }) {
-            Text(this.isFavorite(article.id) ? '♥' : '♡')
-              .fontSize(25)
-              .fontColor(this.isFavorite(article.id) ? '#4C9576' : '#7E8D84')
+            Image(this.isFavorite(article.id) ? $r('app.media.diary_heart_filled') : $r('app.media.diary_heart'))
+              .syncLoad(true)
+              .width(25)
+              .height(25)
           }
           .width(44)
           .height(44)

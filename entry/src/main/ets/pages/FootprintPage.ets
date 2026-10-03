@@ -452,12 +452,13 @@ export struct FootprintPage {
     Row({ space: 18 }) {
       // 左侧：目标完成度环形进度，中心显示百分比
       Stack({ alignContent: Alignment.Center }) {
-        Progress({ value: this.goalPercent(), total: 100, type: ProgressType.Ring })
+        Progress({ value: Math.round(this.goalPercent()), total: 100, type: ProgressType.Ring })
           .width(112)
           .height(112)
           .color('#3E8E68')
           .backgroundColor('#DCE8DC')
           .style({ strokeWidth: 9 })
+          .accessibilityText(`阶段目标完成 ${Math.round(this.goalPercent())}%`)
         Column({ space: 2 }) {
           Text(`${Math.round(this.goalPercent())}%`)
             .fontSize(24)
@@ -521,7 +522,7 @@ export struct FootprintPage {
       // 柱状数据点行：底部对齐，数据点多时缩小字号
       Row({ space: 5 }) {
         if (this.data().verifiedCount === 0) {
-          Text('暂无趋势数据，先去记一笔')
+          Text('暂无已核验数据，先去记一笔')
             .fontSize(14)
             .fontColor('#8A968F')
             .height(96)
@@ -591,24 +592,27 @@ export struct FootprintPage {
           .height(132)
           .onReady((): void => this.drawLineChart())
         if (this.data().verifiedCount === 0) {
-          Text('暂无可绘制的已核验数据')
+          Text('暂无已核验数据，先去记一笔')
             .fontSize(13)
             .fontColor('#8A968F')
         }
       }
       .width('100%')
       .height(132)
-      Row({ space: 8 }) {
-        Text(this.selectedPeriod === '日' ? '分时' : this.selectedPeriod === '周' ? '周一至周日' :
-          this.selectedPeriod === '月' ? '按周' : '按月')
-          .fontSize(12)
-          .fontColor('#87938C')
-        Blank()
-        Text('仅统计已核验记录')
-          .fontSize(12)
-          .fontColor('#9A7A3C')
+      // 空数据时不渲染横轴说明行，避免孤立的"周一至周日"标签残留在空图下方
+      if (this.data().verifiedCount > 0) {
+        Row({ space: 8 }) {
+          Text(this.selectedPeriod === '日' ? '分时' : this.selectedPeriod === '周' ? '周一至周日' :
+            this.selectedPeriod === '月' ? '按周' : '按月')
+            .fontSize(12)
+            .fontColor('#87938C')
+          Blank()
+          Text('仅统计已核验记录')
+            .fontSize(12)
+            .fontColor('#9A7A3C')
+        }
+        .width('100%')
       }
-      .width('100%')
     }
     .width('100%')
     .padding({ left: 22, right: 22, top: 24, bottom: 24 })
@@ -701,7 +705,7 @@ export struct FootprintPage {
       }
       .width('100%')
       if (this.data().categories.length === 0) {
-        Text('暂无分类数据，完成并核验一条行为后显示')
+        Text('暂无已核验数据，先去记一笔')
           .fontSize(13)
           .fontColor('#8A968F')
           .height(150)
@@ -755,12 +759,13 @@ export struct FootprintPage {
       // 左：核验率环形进度；右：核验说明
       Row({ space: 16 }) {
         Stack({ alignContent: Alignment.Center }) {
-          Progress({ value: this.verifiedPercent(), total: 100, type: ProgressType.Ring })
+          Progress({ value: Math.round(this.verifiedPercent()), total: 100, type: ProgressType.Ring })
             .width(76)
             .height(76)
             .color('#4F8FA5')
             .backgroundColor('#DDE8E9')
             .style({ strokeWidth: 7 })
+            .accessibilityText(`系统核验率 ${Math.round(this.verifiedPercent())}%`)
           Text(`${Math.round(this.verifiedPercent())}%`)
             .fontSize(17)
             .fontWeight(FontWeight.Bold)
@@ -815,7 +820,7 @@ export struct FootprintPage {
       .width('100%')
     }
     .width('100%')
-    .padding({ left: 22, right: 22, top: 24, bottom: 190 })
+    .padding({ left: 22, right: 22, top: 24, bottom: 220 })
   }
 
   /**

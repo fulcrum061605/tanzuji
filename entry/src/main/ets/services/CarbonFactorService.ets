@@ -23,6 +23,34 @@ export const CARBON_FACTOR_CATALOG_SOURCE: string =
 /** 华为运动步数换算口径：0.7 米/步（成人平均步幅公开近似值），换算系数 0.7 ÷ 1000 = 0.0007 公里/步 */
 export const STEP_TO_KM: number = 0.0007;
 
+/**
+ * 单位显示口径：内部数据统一使用中文单位名（'公里'/'米'/…），与因子目录保持一致；
+ * 界面展示时距离类单位统一显示为拉丁缩写（km/m），与列表演示标签、足迹等效文案口径一致。
+ * @param unit 内部单位名
+ * @returns 展示用单位文本
+ */
+export function displayUnit(unit: string): string {
+  if (unit === '公里') {
+    return 'km';
+  }
+  if (unit === '米') {
+    return 'm';
+  }
+  return unit;
+}
+
+/**
+ * 数量 + 单位的统一展示格式：拉丁缩写单位前带空格（"1.2 km"），中文单位紧贴数字（"1份"）
+ * @param amount 数量数值
+ * @param unit 内部单位名
+ * @returns 展示文本
+ */
+export function amountWithUnit(amount: number, unit: string): string {
+  const shown: string = displayUnit(unit);
+  const separator: string = shown === 'km' || shown === 'm' ? ' ' : '';
+  return `${amount}${separator}${shown}`;
+}
+
 /** 碳因子目录：全部行为的减排系数与来源（公开近似口径，仅供记录参考） */
 const FACTORS: CarbonFactor[] = [
   { behaviorId: 'walk', unit: '公里', baseUnit: '公里', factor: 0.21, source: '公开近似口径，按替代燃油出行估算' },

@@ -8,7 +8,7 @@ import { common } from '@kit.AbilityKit';
 import { systemShare } from '@kit.ShareKit';
 import { BehaviorOption } from './BehaviorPicker';
 import { RecordDraft } from './RecordDetail';
-import { CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
+import { CARBON_FACTOR_CATALOG_SOURCE, amountWithUnit } from '../services/CarbonFactorService';
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -78,7 +78,7 @@ export struct DiaryDetail {
     if (note.length > 0) {
       return note;
     }
-    return `完成 ${this.draft.amount}${this.draft.unit}，继续保持低碳生活。`;
+    return `完成 ${amountWithUnit(this.draft.amount, this.draft.unit)}，继续保持低碳生活。`;
   }
 
   /**
@@ -149,7 +149,7 @@ export struct DiaryDetail {
     if (this.draft.evidenceSource === 'location') {
       return '数量来源：系统定位轨迹（已过滤异常点）';
     }
-    return '数量来源：手动填写，待核实';
+    return '数量来源：手动填写';
   }
 
   /** 通过 HarmonyOS 系统分享面板分享当前日记文字。 */
@@ -319,7 +319,7 @@ export struct DiaryDetail {
             .syncLoad(true)
             .width(25)
             .height(25)
-          Text(`减排量：${this.draft.reductionKg.toFixed(3)} kg CO₂e · ${this.draft.amount}${this.draft.unit}`)
+          Text(`减排量：${this.draft.reductionKg.toFixed(3)} kg CO₂e · ${amountWithUnit(this.draft.amount, this.draft.unit)}`)
             .fontSize(16)
             .fontColor('#5D806C')
         }

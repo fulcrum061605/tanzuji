@@ -532,7 +532,7 @@ export struct MyPage {
           .syncLoad(true)
           .width(18)
           .height(18)
-        Text('系统核验单条 2–20 分/日最多 30 分；图片辅助认证每日最多 10 分')
+        Text('系统核验：单条 2–20 分，每日上限 30 分；图片辅助认证：每日上限 10 分')
           .fontSize(12)
           .fontColor('#718078')
           .maxLines(2)
@@ -875,9 +875,10 @@ export struct MyPage {
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       // 右侧：进入箭头
-      Text('›')
-        .fontSize(28)
-        .fontColor('#8D9B91')
+      Image($r('app.media.diary_chevron_right'))
+        .syncLoad(true)
+        .width(20)
+        .height(20)
     }
     .width('100%')
     .padding({ left: 22, right: 22, top: 14, bottom: 14 })
@@ -1257,11 +1258,8 @@ export struct MyPage {
             this.MenuRow('积分与权益', '签到、查看积分并兑换模拟低碳权益', $r('app.media.diary_leaf'), () => {
               this.showingRewards = true;
             })
-            // 菜单入口：成长知识库（切换到成长栏目）
-            this.MenuRow('成长知识库', '双碳基础与校园低碳实践', $r('app.media.diary_sprout'), () => {
-              this.navigate('成长');
-            })
-            // 菜单入口：数据管理（本机备份/恢复/CSV 报表）
+            // 菜单入口：数据管理（本机备份/恢复/CSV 报表）；
+            // 成长知识库不再单列入口，底部"成长"栏目直达同一页面
             this.MenuRow('数据管理', '备份、恢复与导出 CSV 报表', $r('app.media.diary_leaf'), () => {
               this.showingDataManagement = true;
             })

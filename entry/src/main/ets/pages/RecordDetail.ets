@@ -11,7 +11,7 @@ import { BehaviorOption } from './BehaviorPicker';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenceService';
-import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE, STEP_TO_KM } from '../services/CarbonFactorService';
+import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE, STEP_TO_KM, displayUnit } from '../services/CarbonFactorService';
 import { AiRecognitionDraft, OnDeviceAiService } from '../services/OnDeviceAiService';
 
 /**
@@ -39,8 +39,10 @@ export interface RecordDraft {
   note: string;
   /** 是否携带真实相册图片；保存时由 photoUri 是否为空统一决定。 */
   hasPhoto: boolean;
-  /** 用户从系统相册选择的持久化图片 URI。 */
+  /** 用户从系统相册选择的持久化图片 URI（日记配图）。 */
   photoUri?: string;
+  /** AI 图片辅助认证使用的相册图片 URI；与日记配图相互独立，避免互相覆盖导致证据链断裂。 */
+  evidencePhotoUri?: string;
   /** 数量来源：系统定位、华为运动或手动待核实。 */
   evidenceSource: EvidenceSource;
   /** 验证状态：只有 verified 记录才计入正式碳积分。 */
@@ -120,8 +122,10 @@ export struct RecordDetail {
   @State private note: string = '';
   /** 是否携带用户从系统相册选择的图片。 */
   @State private hasPhoto: boolean = false;
-  /** 系统相册返回的持久化图片 URI。 */
+  /** 系统相册返回的持久化图片 URI（日记配图）。 */
   @State private photoUri: string = '';
+  /** AI 图片辅助认证的相册图片 URI；与日记配图相互独立，互不覆盖。 */
+  @State private evidencePhotoUri: string = '';
   /** 数量输入框是否聚焦：驱动输入卡片描边加深变绿的编辑反馈 */
   @State private focusedAmount: boolean = false;
   /** 核验状态：verified 已核验 / pending 待核实；只有 verified 计入正式碳积分 */
@@ -170,6 +174,7 @@ export struct RecordDetail {
       this.note = this.initialDraft.note;
       this.hasPhoto = this.initialDraft.hasPhoto;
       this.photoUri = this.initialDraft.photoUri ?? '';
+      this.evidencePhotoUri = this.initialDraft.evidencePhotoUri ?? '';
       this.evidenceSource = this.initialDraft.evidenceSource;
       this.verificationStatus = this.initialDraft.verificationStatus;
       this.evidenceId = this.initialDraft.evidenceId;
@@ -347,6 +352,7 @@ export struct RecordDetail {
       note: this.note,
       hasPhoto: this.photoUri.length > 0,
       photoUri: this.photoUri,
+      evidencePhotoUri: this.evidencePhotoUri,
       evidenceSource: evidenceSource,
       verificationStatus: verificationStatus,
       evidenceId: this.evidenceId,
@@ -471,10 +477,14 @@ export struct RecordDetail {
       });
       const uri: string | undefined = result.photoUris.length > 0 ? result.photoUris[0] : undefined;
       if (uri !== undefined && uri.length > 0) {
-        this.photoUri = uri;
-        this.hasPhoto = true;
         if (runAi) {
+          // 认证入口：图片作为核验证据单独保存，不占用日记配图，避免互相覆盖。
+          this.evidencePhotoUri = uri;
           await this.recognizePhoto(uri);
+        } else {
+          // 日记配图入口：仅作为日记展示图保存。
+          this.photoUri = uri;
+          this.hasPhoto = true;
         }
       }
     } catch (error) {
@@ -518,7 +528,7 @@ export struct RecordDetail {
   }
 
   /**
-   * 顶部导航栏：居中标题"记录详情" + 左侧返回按钮
+   * 顶部导航栏：居中标题（新建"记一笔"/编辑"编辑记录"） + 左侧返回按钮
    */
   @Builder
   private Header() {
@@ -545,8 +555,8 @@ export struct RecordDetail {
       .width('100%')
       .padding({ left: 15, right: 15 })
 
-      // 上层：居中的页面标题
-      Text('记录详情')
+      // 上层：居中的页面标题（新建与编辑使用不同标题，避免录入页误标为"详情"）
+      Text(this.initialDraft === undefined ? '记一笔' : '编辑记录')
         .fontSize(21)
         .fontWeight(FontWeight.Bold)
         .fontColor('#123F2E')
@@ -651,7 +661,7 @@ export struct RecordDetail {
     Column({ space: 5 }) {
       // 以单位名作为 ForEach 键；单位列表稳定，避免不必要的重建
       ForEach(this.units(), (unit: UnitOption) => {
-        Button(unit.name, { type: ButtonType.Normal, stateEffect: false })
+        Button(displayUnit(unit.name), { type: ButtonType.Normal, stateEffect: false })
           .width(70)
           .height(25)
           .fontSize(13)
@@ -779,6 +789,28 @@ export struct RecordDetail {
   }
 
   /**
+   * AI 图片辅助认证入口：选择相册图片并调用端侧 OCR 识别数量
+   * 属于核验证据能力，与下方"补充日记"卡片的配图入口相互独立；
+   * 认证图单独保存（evidencePhotoUri），不会覆盖日记配图
+   */
+  @Builder
+  private AiCertifyButton() {
+    Button({ type: ButtonType.Normal, stateEffect: false }) {
+      Text('上传图片认证')
+        .fontSize(14)
+        .fontColor('#FFFFFF')
+    }
+    .width('100%')
+    .height(38)
+    .padding(0)
+    .backgroundColor('#4C9576')
+    .borderRadius(19)
+    .margin({ bottom: 10 })
+    .accessibilityText('上传图片进行 AI 辅助认证')
+    .onClick(() => { this.choosePhoto(true); })
+  }
+
+  /**
    * 补充日记卡片：标题 + 限长文本域（右下角字数统计）+ 系统相册图片
    */
   @Builder
@@ -868,89 +900,97 @@ export struct RecordDetail {
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
-
-      Button({ type: ButtonType.Normal, stateEffect: false }) {
-        Text('上传图片认证')
-          .fontSize(14)
-          .fontColor('#FFFFFF')
-      }
-      .width('100%')
-      .height(38)
-      .padding(0)
-      .backgroundColor('#4C9576')
-      .borderRadius(19)
-      .onClick(() => { this.choosePhoto(true); })
     }
-    // 卡片外观：与行为卡片一致的纸感浅底细描边
+    // 卡片外观：与行为卡片一致的纸感浅底细描边；
+    // 不再固定高度，大字号模式下由内容自动撑开，避免文字被裁剪
     .width('100%')
     .padding({ left: 14, right: 14, top: 15, bottom: 14 })
-    .height(264)
+    .constraintSize({ minHeight: 220 })
     .backgroundColor('#FAFBF6')
     .border({ width: 1, color: '#DDE8DE' })
     .borderRadius(14)
   }
 
   /**
-   * 页面布局：整页可滚动（小屏弹出输入法时仍能滚到保存按钮），
-   * 自上而下依次为 返回栏 → 行为卡片 → 数量与估算卡片 → 补充日记卡片 → 保存按钮
+   * 页面布局：整页可滚动内容 + 固定底部保存栏
+   * 自上而下依次为 返回栏 → 行为卡片 → 数量与估算卡片（含测量与图片认证入口） → 补充日记卡片；
+   * 保存按钮固定在底部不随内容滚动，任何滚动位置都可见
    */
   build() {
-    Scroll() {
-      Column({ space: 10 }) {
-        this.Header()
-        this.BehaviorCard()
-        // 数量与估算区块：标题按行为切换文案（骑行问"骑了多远"，其他问"完成了多少"）
-        Column({ space: 0 }) {
-          Text(this.behavior.id === 'bike' ? '这次骑了多远？' : '这次完成了多少？')
-            .width('100%')
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#123F2E')
-            .margin({ bottom: 4 })
-          // 输入引导语
-          Text('输入实际完成的数量，系统会自动估算减排量')
-            .width('100%')
-            .fontSize(14)
-            .fontColor('#718078')
-            .margin({ bottom: 11 })
-          this.AmountInput()
-          this.EvidenceControl()
-          this.ReductionCard()
+    Column() {
+      Scroll() {
+        Column({ space: 10 }) {
+          this.Header()
+          this.BehaviorCard()
+          // 数量与估算区块：标题按行为切换文案（骑行问"骑了多远"，其他问"完成了多少"）
+          Column({ space: 0 }) {
+            Text(this.behavior.id === 'bike' ? '这次骑了多远？' : '这次完成了多少？')
+              .width('100%')
+              .fontSize(20)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#123F2E')
+              .margin({ bottom: 4 })
+            // 输入引导语
+            Text('输入实际完成的数量，系统会自动估算减排量')
+              .width('100%')
+              .fontSize(14)
+              .fontColor('#718078')
+              .margin({ bottom: 11 })
+            this.AmountInput()
+            this.EvidenceControl()
+            this.AiCertifyButton()
+            this.ReductionCard()
+          }
+          .width('100%')
+          .padding({ left: 14, right: 14, top: 16, bottom: 15 })
+          // 权限提示和操作按钮会让内容高度动态变化，不能用固定高度裁剪减排卡片。
+          // 保留原来的最小高度，内容超出时由 Column 自动撑开。
+          .constraintSize({ minHeight: 274 })
+          .backgroundColor('#FAFBF6')
+          .border({ width: 1, color: '#DDE8DE' })
+          .borderRadius(14)
+          this.NoteCard()
         }
         .width('100%')
-        .padding({ left: 14, right: 14, top: 16, bottom: 15 })
-        // 权限提示和操作按钮会让内容高度动态变化，不能用固定高度裁剪减排卡片。
-        // 保留原来的最小高度，内容超出时由 Column 自动撑开。
-        .constraintSize({ minHeight: 274 })
-        .backgroundColor('#FAFBF6')
-        .border({ width: 1, color: '#DDE8DE' })
-        .borderRadius(14)
-        this.NoteCard()
-        // 保存按钮：数量有效时森林绿可点击，无效时灰绿禁用（颜色与 enabled 同源联动）
-        Button('保存这次记录', { type: ButtonType.Normal, stateEffect: false })
-          .width('100%')
-          .height(37)
-          .fontSize(18)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .backgroundColor(this.amount() > 0 ? '#4C9576' : '#B6CBBE')
-          .borderRadius(20)
-          .enabled(this.isAutoMeasured() || this.amount() > 0)
-          .margin({ top: 6 })
-          .onClick(() => this.save())
+        // 平板限宽 620 居中，手机满宽不受影响
+        .constraintSize({ maxWidth: 620 })
+        .padding({ left: 19, right: 19, top: 17, bottom: 14 })
       }
       .width('100%')
-      // 平板限宽 620 居中，手机满宽不受影响
-      .constraintSize({ maxWidth: 620 })
-      // 底部预留 56，避免保存按钮贴到屏幕边缘
-      .padding({ left: 19, right: 19, top: 17, bottom: 56 })
+      .layoutWeight(1)
+      // 隐藏滚动条，保持纸面整洁
+      .scrollBar(BarState.Off)
+      // 固定底部保存栏
+      this.SaveBar()
     }
     .width('100%')
     .height('100%')
-    // 隐藏滚动条，保持纸面整洁
-    .scrollBar(BarState.Off)
     // 与首页一致的纸张底色
     .backgroundColor('#F7F8F2')
+  }
+
+  /**
+   * 固定底部保存栏：不随内容滚动
+   * 数量有效时森林绿可点击，无效时灰绿禁用（颜色与 enabled 同源联动）
+   */
+  @Builder
+  private SaveBar() {
+    Column() {
+      Button('保存这次记录', { type: ButtonType.Normal, stateEffect: false })
+        .width('100%')
+        .height(44)
+        .fontSize(17)
+        .fontWeight(FontWeight.Medium)
+        .fontColor('#FFFFFF')
+        .backgroundColor(this.amount() > 0 ? '#4C9576' : '#B6CBBE')
+        .borderRadius(22)
+        .enabled(this.isAutoMeasured() || this.amount() > 0)
+        .onClick(() => this.save())
+    }
+    .width('100%')
+    // 与滚动内容一致的平板限宽，父容器默认居中对齐
+    .constraintSize({ maxWidth: 620 })
+    .padding({ left: 19, right: 19, top: 8, bottom: 20 })
   }
 }
 

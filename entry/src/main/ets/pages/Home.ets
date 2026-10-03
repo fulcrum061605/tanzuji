@@ -9,6 +9,7 @@
 import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { RecordDraft } from './RecordDetail';
+import { amountWithUnit } from '../services/CarbonFactorService';
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -175,14 +176,14 @@ export struct Home {
       const title: string = note.length > 0 ? note.slice(0, 18) : `${draft.behavior.name}记录`;
       const content: string = note.length > 0
         ? note
-        : `完成 ${draft.amount}${draft.unit}，继续保持低碳生活。`;
+        : `完成 ${amountWithUnit(draft.amount, draft.unit)}，继续保持低碳生活。`;
       return {
         id: `saved-${draft.recordId ?? draft.operationId ?? `legacy-${index}`}`,
         time: this.formatTime(draft.recordedAt ?? draft.createdAt ?? Date.now()),
         title: title,
         content: content,
         label: draft.verificationStatus === 'verified'
-          ? `${draft.behavior.name} · ${draft.amount}${draft.unit} · 已核验`
+          ? `${draft.behavior.name} · ${amountWithUnit(draft.amount, draft.unit)} · 已核验`
           : `${draft.behavior.name} · 待核实`,
         icon: draft.behavior.icon,
         photoUri: draft.photoUri,
