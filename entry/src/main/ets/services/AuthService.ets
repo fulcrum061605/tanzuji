@@ -26,6 +26,12 @@ export interface LoginResult {
   user?: LoginUser;
 }
 
+/** 最近一次成功登录的本机会话，只保存用户标识和昵称，不保存密码。 */
+interface StoredSession {
+  userId: string;
+  displayName: string;
+}
+
 /**
  * Preferences 中存储的账号结构（JSON 序列化后的形态）
  * 只包含盐与派生值，不包含明文密码
@@ -45,6 +51,7 @@ interface StoredAccount {
 export class AuthService {
   /** PBKDF2 迭代次数：放大计算成本，提高暴力破解难度 */
   private static readonly ITERATIONS: number = 600000;
+  private static readonly SESSION_STORE: string = 'tanji_local_session_v1';
 
   /**
    * 注册信息预校验（纯规则校验，不涉及存储）
@@ -81,6 +88,34 @@ export class AuthService {
     }
     // 打开（不存在则创建）本机账号偏好存储
     return preferences.getPreferences(context, { name: 'tanji_local_accounts_v1' });
+  }
+
+  /** 保存成功登录会话，供应用冷启动恢复登录态。 */
+  public async rememberSession(context: common.Context | undefined, user: LoginUser): Promise<void> {
+    if (context === undefined) {
+      return;
+    }
+    const store: preferences.Preferences = await preferences.getPreferences(context, { name: AuthService.SESSION_STORE });
+    await store.put('current_user', JSON.stringify({ userId: user.userId, displayName: user.displayName } as StoredSession));
+    await store.flush();
+  }
+
+  /** 读取最近一次登录会话；无会话或数据损坏时返回 undefined。 */
+  public async restoreSession(context: common.Context | undefined): Promise<LoginUser | undefined> {
+    try {
+      if (context === undefined) {
+        return undefined;
+      }
+      const store: preferences.Preferences = await preferences.getPreferences(context, { name: AuthService.SESSION_STORE });
+      const value: preferences.ValueType = await store.get('current_user', '');
+      if (typeof value !== 'string' || value.length === 0) {
+        return undefined;
+      }
+      const session: StoredSession = JSON.parse(value) as StoredSession;
+      return session.userId.length > 0 && session.displayName.length > 0 ? session : undefined;
+    } catch (error) {
+      return undefined;
+    }
   }
 
   /**
@@ -121,8 +156,9 @@ export class AuthService {
     }
     // 保留原演示账号，便于课堂演示；不代表远程身份认证。
     if (normalized === 'admin' && password === '123456') {
-      return { success: true, message: '登录成功',
-        user: { userId: 'demo-user-001', displayName: '碳记用户' } };
+      const user: LoginUser = { userId: 'demo-user-001', displayName: '碳记用户' };
+      await this.rememberSession(context, user);
+      return { success: true, message: '登录成功', user: user };
     }
     // 读取本机账号记录；无记录按"账号或密码错误"提示（不暴露账号是否存在）
     const store: preferences.Preferences = await this.openStore(context);
@@ -141,8 +177,9 @@ export class AuthService {
       return { success: false, message: '账号或密码不正确' };
     }
     // 校验通过：返回本机账号的用户信息
-    return { success: true, message: '登录成功',
-      user: { userId: `local-${normalized}`, displayName: normalized } };
+    const user: LoginUser = { userId: `local-${normalized}`, displayName: normalized };
+    await this.rememberSession(context, user);
+    return { success: true, message: '登录成功', user: user };
   }
 
   /**

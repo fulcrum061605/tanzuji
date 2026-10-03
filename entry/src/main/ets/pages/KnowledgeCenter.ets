@@ -6,9 +6,18 @@ import { common } from '@kit.AbilityKit';
 import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
+import { RecordDraft } from './RecordDetail';
 
 /** 分类筛选栏的固定选项：'收藏' 视图复用收藏数据 */
 const KNOWLEDGE_CATEGORIES: string[] = ['全部', '双碳基础', '生活技巧', '校园行动', '收藏'];
+
+/** 离线推荐评分后的文章包装：文章与推荐得分配对 */
+interface ScoredArticle {
+  /** 参与评分的文章 */
+  article: KnowledgeArticle;
+  /** 本地规则累计的推荐得分（收藏分类、基础补课与未覆盖行为加权），越高越靠前 */
+  score: number;
+}
 
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
@@ -31,8 +40,12 @@ export struct KnowledgeCenter {
   @Prop selectedTab: string = '成长';
   /** 切换底部栏目回调：参数为目标栏目名，由入口页完成页面切换 */
   onNavigate?: (tab: string) => void;
+  /** 当前用户的真实记录，只用于离线个性推荐。 */
+  @Prop savedDrafts: RecordDraft[] = [];
   /** 全部文章列表：内置与管理员自定义文章合并后的结果 */
   @State private articles: KnowledgeArticle[] = [];
+  /** 本地规则生成的文章推荐，不参与搜索结果。 */
+  @State private recommendedArticles: KnowledgeArticle[] = [];
   /** 已收藏的文章 id 列表 */
   @State private favoriteIds: string[] = [];
   /** 搜索框内容：作为标题/摘要/关键字/正文的过滤条件 */
@@ -88,10 +101,64 @@ export struct KnowledgeCenter {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       this.articles = await this.knowledgeService.loadArticles(context);
       this.favoriteIds = await this.knowledgeService.loadFavorites(context);
+      this.refreshRecommendations();
     } catch (error) {
       this.showToast('知识资源暂时无法读取');
     } finally {
       this.loading = false;
+    }
+  }
+
+  /** 根据真实记录、收藏分类和未覆盖行为生成可解释的离线推荐。 */
+  private refreshRecommendations(): void {
+    const recordedIds: string[] = this.savedDrafts.map((draft: RecordDraft): string => draft.behavior.id);
+    const favoriteCategories: string[] = this.articles
+      .filter((article: KnowledgeArticle): boolean => this.favoriteIds.includes(article.id))
+      .map((article: KnowledgeArticle): string => article.category);
+    const scored: ScoredArticle[] = this.articles.map((article: KnowledgeArticle): ScoredArticle => {
+      let score: number = 1;
+      const searchable: string = `${article.title}${article.summary}${article.keywords.join('')}`.toLowerCase();
+      if (favoriteCategories.includes(article.category)) {
+        score += 3;
+      }
+      if (article.category === '双碳基础' && recordedIds.length === 0) {
+        score += 3;
+      }
+      const missingBehaviorTopic: boolean =
+        (!recordedIds.includes('bike') && (searchable.includes('骑行') || searchable.includes('出行'))) ||
+        (!recordedIds.includes('recycle') && (searchable.includes('回收') || searchable.includes('垃圾'))) ||
+        (!recordedIds.includes('electricity') && searchable.includes('用电'));
+      if (missingBehaviorTopic) {
+        score += 4;
+      }
+      return { article: article, score: score };
+    });
+    scored.sort((left: ScoredArticle, right: ScoredArticle): number => right.score - left.score);
+    this.recommendedArticles = scored.slice(0, 3).map((item: ScoredArticle): KnowledgeArticle => item.article);
+  }
+
+  /** 推荐文章区域：搜索或分类筛选时隐藏，避免干扰用户主动查找。 */
+  @Builder
+  private RecommendationSection() {
+    if (this.searchText.trim().length === 0 && this.selectedCategory === '全部' && this.recommendedArticles.length > 0) {
+      Column({ space: 8 }) {
+        Row() {
+          Text('为你推荐')
+            .fontSize(17)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#123F2E')
+          Blank()
+          Text('根据你的低碳记录')
+            .fontSize(11)
+            .fontColor('#7B8B82')
+        }
+        .width('100%')
+        ForEach(this.recommendedArticles, (article: KnowledgeArticle) => {
+          this.ArticleRow(article)
+        }, (article: KnowledgeArticle): string => `recommend-${article.id}`)
+      }
+      .width('100%')
+      .padding({ left: 22, right: 22, top: 8, bottom: 4 })
     }
   }
 
@@ -129,6 +196,7 @@ export struct KnowledgeCenter {
       this.favoriteIds = [...this.favoriteIds, id];
       this.showToast('已收藏，可离线查看');
     }
+    this.refreshRecommendations();
     this.persistFavorites();
   }
 
@@ -185,7 +253,7 @@ export struct KnowledgeCenter {
    */
   private articleIcon(article: KnowledgeArticle): Resource {
     switch (article.illustration) {
-      case 'travel': return $r('app.media.diary_transit');
+      case 'travel': return $r('app.media.diary_walk');
       case 'electricity': return $r('app.media.diary_electricity');
       case 'food': return $r('app.media.diary_meal');
       case 'recycle': return $r('app.media.diary_recycle');
@@ -236,8 +304,8 @@ export struct KnowledgeCenter {
           .fontWeight(FontWeight.Bold)
           .fontColor('#123F2E')
         Row() {
-          // 左侧副标题
-          Text('双碳知识库')
+          // 左侧功能提示，避免与“成长”栏目标题重复
+          Text('低碳知识与行动')
             .fontSize(14)
             .fontColor('#718078')
           Blank()
@@ -569,7 +637,7 @@ export struct KnowledgeCenter {
       .layoutWeight(1)
       .padding({ left: 22, right: 22 })
       .divider({ strokeWidth: 0.5, color: '#DBE2D8' })
-      .contentEndOffset(174)
+      .contentEndOffset(220)
       .scrollBar(BarState.Off)
       .edgeEffect(EdgeEffect.Spring)
     }
@@ -824,13 +892,23 @@ export struct KnowledgeCenter {
         if (this.openedArticle() !== undefined) {
           this.ArticleDetail(this.openedArticle() as KnowledgeArticle)
         } else {
-          // 列表视图：搜索头部 + 管理员编辑器/分类栏与列表
+          // 列表视图：搜索头部固定，下面的正文区独立占据剩余高度。
           this.SearchHeader()
           if (this.showingEditor && this.adminMode) {
             this.AdminEditor()
           } else {
-            this.CategoryBar()
-            this.ArticleList()
+            // 推荐区、筛选栏和文章列表在同一受限容器内排版，
+            // 推荐内容变长时只压缩列表，不会把底部导航推入正文流。
+            Column() {
+              // 分类栏固定紧跟搜索框；点击“全部”时也不会被推荐区挤到下面。
+              this.CategoryBar()
+              this.RecommendationSection()
+              this.ArticleList()
+            }
+            .width('100%')
+            .layoutWeight(1)
+            // 给滚动内容留出底栏的可视安全区，最后一条文章不会被玻璃底栏盖住。
+            .padding({ bottom: 104 })
           }
         }
       }

@@ -57,11 +57,11 @@
         // Ability 描述（引用资源）
         "description": "$string:EntryAbility_desc",
         // 桌面图标：分层图标资源
-        "icon": "$media:layered_image",
+        "icon": "$media:carbon_icon",
         // 桌面显示名称（引用资源）
         "label": "$string:EntryAbility_label",
         // 启动页图标
-        "startWindowIcon": "$media:startIcon",
+        "startWindowIcon": "$media:carbon_icon",
         // 启动页背景色（引用 element/color.json 资源）
         "startWindowBackground": "$color:start_window_background",
         // 是否可被外部应用隐式拉起

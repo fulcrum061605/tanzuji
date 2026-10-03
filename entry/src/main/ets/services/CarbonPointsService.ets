@@ -26,6 +26,12 @@ export interface PointsSnapshot {
   recordDay: string;
   /** 当日核验记录已入账积分，配合每日上限使用 */
   recordDayPoints: number;
+  /** 图片辅助认证使用独立的每日积分上限。 */
+  aiRecordDay?: string;
+  /** 当日图片辅助认证已入账积分，配合独立每日上限使用 */
+  aiRecordDayPoints?: number;
+  /** 已获得图片辅助认证积分的图片摘要。 */
+  aiRewardedImageHashes?: string[];
 }
 
 /** 签到/入账/兑换操作的统一结果 */
@@ -65,7 +71,10 @@ const EMPTY_POINTS: PointsSnapshot = {
   rewardedOperationIds: [],
   redeemedRewardIds: [],
   recordDay: '',
-  recordDayPoints: 0
+  recordDayPoints: 0,
+  aiRecordDay: '',
+  aiRecordDayPoints: 0,
+  aiRewardedImageHashes: []
 };
 
 export class CarbonPointsService {
@@ -75,10 +84,13 @@ export class CarbonPointsService {
   private static readonly STATE_KEY: string = 'points_state';
   /** 核验记录每日入账积分上限 */
   private static readonly DAILY_RECORD_LIMIT: number = 30;
+  /** 图片辅助认证每日积分上限，不与系统核验上限混用。 */
+  private static readonly DAILY_AI_RECORD_LIMIT: number = 10;
   /** 单位减排量对应积分；积分只对系统核验的减排量开放。 */
   private static readonly POINTS_PER_KG: number = 20;
-  /** 单条核验记录积分上下限，避免大数值记录一次性刷满。 */
+  /** 单条核验记录积分下限，避免小额记录被四舍五入清零。 */
   private static readonly MIN_RECORD_POINTS: number = 2;
+  /** 单条核验记录积分上限，避免大数值记录一次性刷满。 */
   private static readonly MAX_RECORD_POINTS: number = 20;
 
   /** 生成本地日期键（yyyy-MM-dd），用于签到去重与每日上限跨天重置 */
@@ -112,7 +124,11 @@ export class CarbonPointsService {
       rewardedOperationIds: Array.isArray(value.rewardedOperationIds) ? value.rewardedOperationIds : [],
       redeemedRewardIds: Array.isArray(value.redeemedRewardIds) ? value.redeemedRewardIds : [],
       recordDay: typeof value.recordDay === 'string' ? value.recordDay : '',
-      recordDayPoints: Math.max(0, Number(value.recordDayPoints) || 0)
+      recordDayPoints: Math.max(0, Number(value.recordDayPoints) || 0),
+      aiRecordDay: typeof value.aiRecordDay === 'string' ? value.aiRecordDay : '',
+      aiRecordDayPoints: Math.max(0, Number(value.aiRecordDayPoints) || 0),
+      aiRewardedImageHashes: Array.isArray(value.aiRewardedImageHashes)
+        ? value.aiRewardedImageHashes.filter((item: string): boolean => item.length > 0) : []
     };
   }
 
@@ -171,7 +187,11 @@ export class CarbonPointsService {
     }
   }
 
-  /** 每天一次签到，固定 5 分，不与碳减排行为积分重复计算。 */
+  /**
+   * 每天一次签到，固定 5 分，不与碳减排行为积分重复计算。
+   * @param context 应用上下文
+   * @returns 统一操作结果（重复签到时失败并返回当前余额）
+   */
   async checkIn(context: common.Context): Promise<PointsActionResult> {
     const snapshot: PointsSnapshot = await this.load(context);
     const key: string = `check-in-${this.today()}`;
@@ -183,6 +203,31 @@ export class CarbonPointsService {
     snapshot.totalEarned += 5;
     await this.save(context, snapshot);
     return this.result(true, 5, snapshot.balance, '签到成功，获得 5 积分');
+  }
+
+  /**
+   * 领取白名单中的日常低碳任务。
+   * 任务只能由页面在满足本地条件后调用，服务层再次校验任务 id、分值和当日去重。
+   * @param context 应用上下文
+   * @param taskId 任务 id（当前白名单：verified-travel 5 分 / knowledge-favorite 3 分）
+   * @returns 统一操作结果（任务无效或当日已完成时失败）
+   */
+  async claimTask(context: common.Context, taskId: string): Promise<PointsActionResult> {
+    const taskPoints: number | undefined = taskId === 'verified-travel' ? 5 :
+      taskId === 'knowledge-favorite' ? 3 : undefined;
+    const snapshot: PointsSnapshot = await this.load(context);
+    if (taskPoints === undefined) {
+      return this.result(false, 0, snapshot.balance, '任务信息无效');
+    }
+    const key: string = `task-${taskId}-${this.today()}`;
+    if (snapshot.claimedTaskKeys.includes(key)) {
+      return this.result(false, 0, snapshot.balance, '今天已经完成这个任务');
+    }
+    snapshot.claimedTaskKeys = [...snapshot.claimedTaskKeys, key];
+    snapshot.balance += taskPoints;
+    snapshot.totalEarned += taskPoints;
+    await this.save(context, snapshot);
+    return this.result(true, taskPoints, snapshot.balance, `任务完成，获得 ${taskPoints} 积分`);
   }
 
   /**
@@ -198,7 +243,7 @@ export class CarbonPointsService {
    */
   async rewardVerifiedRecord(context: common.Context, operationId: string,
     verified: boolean, scoreEnabled: boolean,
-    evidenceSource: 'location' | 'health' | 'manual' = 'manual', reductionKg: number = 0): Promise<PointsActionResult> {
+    evidenceSource: 'location' | 'health' | 'ai_image' | 'manual' = 'manual', reductionKg: number = 0): Promise<PointsActionResult> {
     const snapshot: PointsSnapshot = await this.load(context);
     // 只有系统定位或华为运动产生的证据可以入账；手动输入即使被调用方误标为
     // verified，也必须在服务层拦截，避免通过重复编辑或改写页面状态刷分。
@@ -230,7 +275,61 @@ export class CarbonPointsService {
     return this.result(true, points, snapshot.balance, `核验成功，获得 ${points} 积分`);
   }
 
-  /** 模拟权益兑换：扣除本地积分并记录权益 id，不调用真实平台。 */
+  /**
+   * 图片辅助认证积分：系统核验积分的一半，单独每日封顶。
+   * 同一 operationId 或同一图片指纹只入账一次；携带风险标记的图片一律拒绝。
+   * @param context 应用上下文
+   * @param operationId 本地记录操作号，入账去重依据
+   * @param imageHash 图片内容指纹，重复提交拦截依据
+   * @param reductionKg 本条记录的减排量（kg CO₂e），按系统积分折半计算
+   * @param riskFlags 本地风险标记列表；非空时不发放积分
+   * @returns 统一操作结果（是否成功、本次积分、最新余额与提示文案）
+   */
+  async rewardAiImageRecord(context: common.Context, operationId: string,
+    imageHash: string, reductionKg: number, riskFlags: string[] = []): Promise<PointsActionResult> {
+    const snapshot: PointsSnapshot = await this.load(context);
+    if (operationId.length === 0 || imageHash.length === 0) {
+      return this.result(false, 0, snapshot.balance, '图片认证信息不完整');
+    }
+    if (riskFlags.length > 0) {
+      return this.result(false, 0, snapshot.balance,
+        riskFlags.includes('重复图片') ? '图片重复提交，未获得积分' : '图片信息存在风险，未获得积分');
+    }
+    if (snapshot.rewardedOperationIds.includes(operationId) ||
+      (snapshot.aiRewardedImageHashes ?? []).includes(imageHash)) {
+      return this.result(false, 0, snapshot.balance, '该图片或记录已经认证过');
+    }
+    const today: string = this.today();
+    if (snapshot.aiRecordDay !== today) {
+      snapshot.aiRecordDay = today;
+      snapshot.aiRecordDayPoints = 0;
+    }
+    const systemPoints: number = Math.max(CarbonPointsService.MIN_RECORD_POINTS,
+      Math.min(CarbonPointsService.MAX_RECORD_POINTS,
+        Math.round(Math.max(0, reductionKg) * CarbonPointsService.POINTS_PER_KG)));
+    const calculated: number = Math.max(1, Math.floor(systemPoints * 0.5));
+    const points: number = Math.min(calculated,
+      CarbonPointsService.DAILY_AI_RECORD_LIMIT - (snapshot.aiRecordDayPoints ?? 0));
+    snapshot.rewardedOperationIds = [...snapshot.rewardedOperationIds, operationId];
+    snapshot.aiRewardedImageHashes = [...(snapshot.aiRewardedImageHashes ?? []), imageHash];
+    if (points <= 0) {
+      await this.save(context, snapshot);
+      return this.result(false, 0, snapshot.balance, '今日图片认证积分已达上限');
+    }
+    snapshot.aiRecordDayPoints = (snapshot.aiRecordDayPoints ?? 0) + points;
+    snapshot.balance += points;
+    snapshot.totalEarned += points;
+    await this.save(context, snapshot);
+    return this.result(true, points, snapshot.balance, `AI 辅助认证成功，获得 ${points} 积分`);
+  }
+
+
+  /**
+   * 模拟权益兑换：扣除本地积分并记录权益 id，不调用真实平台。
+   * @param context 应用上下文
+   * @param reward 待兑换的权益项（id 与价格由服务层白名单再次校验）
+   * @returns 统一操作结果（权益无效、重复领取或余额不足时失败）
+   */
   async redeem(context: common.Context, reward: PointsReward): Promise<PointsActionResult> {
     const snapshot: PointsSnapshot = await this.load(context);
     if (!this.isAllowedReward(reward)) {

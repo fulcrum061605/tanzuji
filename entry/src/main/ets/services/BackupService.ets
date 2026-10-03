@@ -64,7 +64,8 @@ export class BackupService {
     if (typeof value !== 'string' || value.length === 0) {
       return { version: 0, exportedAt: 0, records: [], points: {
         balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
-        redeemedRewardIds: [], recordDay: '', recordDayPoints: 0
+        redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
+        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
       }, favoriteIds: [] };
     }
     try {
@@ -72,13 +73,15 @@ export class BackupService {
       return payload.version === 1 && Array.isArray(payload.records) ? payload : {
         version: 0, exportedAt: 0, records: [], points: {
           balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
-          redeemedRewardIds: [], recordDay: '', recordDayPoints: 0
+          redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
+          aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
         }, favoriteIds: []
       };
     } catch (error) {
       return { version: 0, exportedAt: 0, records: [], points: {
         balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
-        redeemedRewardIds: [], recordDay: '', recordDayPoints: 0
+        redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
+        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
       }, favoriteIds: [] };
     }
   }
@@ -91,7 +94,7 @@ export class BackupService {
    * @returns CSV 文本内容；用户取消保存时仍返回预览文本
    */
   async exportCsv(context: common.Context, records: RecordDraft[]): Promise<string> {
-    const rows: string[] = ['recordId,recordedAt,behavior,amount,unit,reductionKg,verificationStatus,evidenceSource,photoUri,note'];
+    const rows: string[] = ['recordId,recordedAt,behavior,amount,unit,reductionKg,verificationStatus,evidenceSource,verificationKind,aiStatus,riskFlags,photoUri,note'];
     records.forEach((record: RecordDraft): void => {
       const cells: string[] = [
         record.recordId ?? record.operationId ?? '',
@@ -102,6 +105,9 @@ export class BackupService {
         record.reductionKg.toFixed(3),
         record.verificationStatus,
         record.evidenceSource,
+        record.verificationKind ?? 'manual',
+        record.aiStatus ?? 'none',
+        (record.riskFlags ?? []).join('|'),
         record.photoUri ?? '',
         record.note.replace(/"/g, '""').replace(/\n/g, ' ')
       ];

@@ -7,8 +7,8 @@ import { abilityAccessCtrl, common, Permissions, PermissionRequestResult } from 
 import { geoLocationManager } from '@kit.LocationKit';
 import { healthService, healthStore } from '@kit.HealthServiceKit';
 
-/** 证据来源类型：'location' 系统定位轨迹 / 'health' 华为运动数据 / 'manual' 手动记录待核实 */
-export type EvidenceSource = 'location' | 'health' | 'manual';
+/** 证据来源类型：'location' 系统定位轨迹 / 'health' 华为运动数据 / 'ai_image' 端侧 OCR 图片辅助 / 'manual' 手动记录待核实 */
+export type EvidenceSource = 'location' | 'health' | 'ai_image' | 'manual';
 
 /** 证据测量结果：携带数量、来源、核验状态与提示文案 */
 export interface EvidenceResult {
@@ -98,10 +98,12 @@ export class CarbonEvidenceService {
     const atManager: abilityAccessCtrl.AtManager = abilityAccessCtrl.createAtManager();
     const result: PermissionRequestResult =
       await atManager.requestPermissionsFromUser(context, permissions);
-    // 定位权限：精确或模糊任一授予即可
-    const locationGranted: boolean = result.authResults[0] === 0 || result.authResults[1] === 0;
-    // 运动权限：必须单独授予
-    const motionGranted: boolean = result.authResults[2] === 0;
+    // 不同系统版本在权限被拒或权限不存在时可能返回较短数组，缺项按未授权处理。
+    const authResults: number[] = result.authResults;
+    const locationGranted: boolean = authResults.length > 0 &&
+      (authResults[0] === 0 || (authResults.length > 1 && authResults[1] === 0));
+    // 运动权限必须明确返回授权；缺少第三项不能当作已授权。
+    const motionGranted: boolean = authResults.length > 2 && authResults[2] === 0;
     return locationGranted && motionGranted;
   }
 

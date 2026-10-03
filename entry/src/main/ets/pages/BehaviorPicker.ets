@@ -27,8 +27,8 @@ const BEHAVIOR_OPTIONS: BehaviorOption[] = [
   { id: 'walk', name: '步行', icon: $r('app.media.diary_walk') },
   { id: 'bike', name: '骑行', icon: $r('app.media.diary_bike') },
   { id: 'transit', name: '公共交通', icon: $r('app.media.diary_transit') },
-  { id: 'carpool', name: '拼车出行', icon: $r('app.media.diary_transit') },
-  { id: 'metro', name: '地铁出行', icon: $r('app.media.diary_transit') },
+  { id: 'carpool', name: '拼车出行', icon: $r('app.media.diary_person') },
+  { id: 'metro', name: '地铁出行', icon: $r('app.media.diary_calendar') },
   // 节能节水类：节约用电 / 节约用水
   { id: 'electricity', name: '节约用电', icon: $r('app.media.diary_electricity') },
   { id: 'water', name: '节约用水', icon: $r('app.media.diary_water') },

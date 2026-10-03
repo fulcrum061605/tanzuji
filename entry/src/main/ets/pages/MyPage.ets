@@ -11,6 +11,18 @@ import { CarbonPointsService, PointsReward, PointsSnapshot } from '../services/C
 import { RecordDraft } from './RecordDetail';
 import { BackupPayload, BackupService } from '../services/BackupService';
 
+/** 积分页展示的日常任务定义；资格条件由页面结合真实本地数据判断。 */
+interface DailyTask {
+  /** 任务 id：由积分服务白名单校验（verified-travel / knowledge-favorite） */
+  id: string;
+  /** 任务标题（如 '完成一次核验出行'） */
+  title: string;
+  /** 完成条件说明，展示在任务行副标题 */
+  description: string;
+  /** 完成后可领取的积分，实际入账以服务层白名单分值为准 */
+  points: number;
+}
+
 /**
  * 判断当前设备是否具备液态玻璃（沉浸式系统材质）能力
  * 需同时满足：系统软件 API 不低于 26 且设备声明支持沉浸式材质；
@@ -36,6 +48,8 @@ export struct MyPage {
   @Prop savedDrafts: RecordDraft[] = [];
   /** 恢复备份后回传记录列表，由入口页更新数据并落盘 */
   onRestoreRecords?: (records: RecordDraft[]) => void;
+  /** 从积分认证入口进入行为选择页，之后复用记录详情的图片认证流程。 */
+  onStartImageCertification?: () => void;
   /** 全部文章列表：用于渲染收藏项与详情 */
   @State private articles: KnowledgeArticle[] = [];
   /** 已收藏的文章 id 列表 */
@@ -56,10 +70,14 @@ export struct MyPage {
   @State private pressedTab: string = '';
   /** 当前可用碳积分余额 */
   @State private points: number = 0;
+  /** 当前登录用户昵称，来自本地登录会话。 */
+  @State private displayName: string = '碳记用户';
   /** 累计获得积分（含已兑换消耗的部分） */
   @State private totalEarnedPoints: number = 0;
   /** 今日是否已签到：由积分快照中的签到任务键推算 */
   @State private claimedCheckIn: boolean = false;
+  /** 今日已领取的任务键，用于展示任务完成状态。 */
+  @State private claimedTaskKeys: string[] = [];
   /** 已兑换（已领取）的模拟权益 id 列表 */
   @State private redeemedRewardIds: string[] = [];
   /** 签到请求进行中标记：防止重复点击 */
@@ -79,6 +97,11 @@ export struct MyPage {
     { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
     { id: 'travel-coupon', title: '低碳出行优惠券', description: '模拟权益码：GREEN-TRAVEL-2026', cost: 120 }
   ];
+  /** 日常任务不允许页面自定义，分值由服务层再次白名单校验。 */
+  private readonly dailyTasks: DailyTask[] = [
+    { id: 'verified-travel', title: '完成一次核验出行', description: '步行、骑行或公共交通满 1 km', points: 5 },
+    { id: 'knowledge-favorite', title: '收藏一篇双碳科普', description: '在成长页收藏任意一篇文章', points: 3 }
+  ];
   /** 底部导航条的液态玻璃材质：薄样式 + 低不透明度淡绿赋色；不具备能力的设备为 undefined */
   private navBarMaterial: uiMaterial.Material | undefined = isGlassCapable()
     ? new uiMaterial.ImmersiveMaterial({
@@ -89,6 +112,10 @@ export struct MyPage {
 
   /** 组件即将出现：加载文章与收藏列表 */
   aboutToAppear(): void {
+    const savedName: string | undefined = AppStorage.get<string>('loginDisplayName');
+    if (savedName !== undefined && savedName.length > 0) {
+      this.displayName = savedName;
+    }
     this.loadFavorites();
     this.loadPoints();
   }
@@ -104,6 +131,7 @@ export struct MyPage {
       this.points = snapshot.balance;
       this.totalEarnedPoints = snapshot.totalEarned;
       this.claimedCheckIn = snapshot.claimedTaskKeys.includes(`check-in-${this.todayKey()}`);
+      this.claimedTaskKeys = snapshot.claimedTaskKeys;
       this.redeemedRewardIds = snapshot.redeemedRewardIds;
     } catch (error) {
       this.showToast('积分数据暂时无法读取');
@@ -134,6 +162,43 @@ export struct MyPage {
       this.showToast('签到暂时不可用');
     } finally {
       this.checkingIn = false;
+    }
+  }
+
+  /** 当前任务是否已领取。 */
+  private taskClaimed(task: DailyTask): boolean {
+    return this.claimedTaskKeys.includes(`task-${task.id}-${this.todayKey()}`);
+  }
+
+  /** 只有真实本地数据满足条件时，任务按钮才可领取。 */
+  private taskReady(task: DailyTask): boolean {
+    if (task.id === 'knowledge-favorite') {
+      return this.favoriteIds.length > 0;
+    }
+    return this.savedDrafts.some((draft: RecordDraft): boolean => {
+      if (draft.verificationStatus !== 'verified' || !draft.scoreEnabled) {
+        return false;
+      }
+      const travelIds: string[] = ['walk', 'bike', 'transit', 'carpool', 'metro'];
+      if (!travelIds.includes(draft.behavior.id)) {
+        return false;
+      }
+      return draft.unit === '米' ? draft.amount >= 1000 : draft.amount >= 1;
+    });
+  }
+
+  /** 领取符合条件的日常任务，积分入账由服务层控制。 */
+  private async claimDailyTask(task: DailyTask): Promise<void> {
+    if (this.taskClaimed(task) || !this.taskReady(task)) {
+      return;
+    }
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const result = await this.pointsService.claimTask(context, task.id);
+      this.showToast(result.message);
+      await this.loadPoints();
+    } catch (error) {
+      this.showToast('任务暂时不可用');
     }
   }
 
@@ -356,7 +421,7 @@ export struct MyPage {
       }
       // 昵称与个性签名
       Column({ space: 5 }) {
-        Text('碳记用户')
+        Text(this.displayName)
           .fontSize(21)
           .fontWeight(FontWeight.Bold)
           .fontColor('#173F2E')
@@ -390,11 +455,11 @@ export struct MyPage {
       .layoutWeight(1)
       // 离线可读说明
       Column({ space: 5 }) {
-        Text('离线')
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
+        Text('离线可读')
+          .fontSize(16)
+          .fontWeight(FontWeight.Medium)
           .fontColor('#246244')
-        Text('随时可读')
+        Text('已缓存的科普文章')
           .fontSize(13)
           .fontColor('#718078')
       }
@@ -437,13 +502,32 @@ export struct MyPage {
           .syncLoad(true)
           .width(18)
           .height(18)
-        Text('积分按核验减排量计算，单条 2–20 分；每日最多 30 分，手动待核实不计分')
+        Text('系统核验单条 2–20 分/日最多 30 分；图片辅助认证每日最多 10 分')
           .fontSize(12)
           .fontColor('#718078')
           .maxLines(2)
+          .layoutWeight(1)
+          .lineHeight(18)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+      Button({ type: ButtonType.Normal, stateEffect: true }) {
+        Row({ space: 8 }) {
+          Image($r('app.media.diary_camera'))
+            .syncLoad(true)
+            .width(18)
+            .height(18)
+          Text('上传图片认证，AI 辅助获得积分')
+            .fontSize(13)
+            .fontColor('#246244')
+        }
+      }
+      .width('100%')
+      .height(38)
+      .padding(0)
+      .backgroundColor('#F5FBF3')
+      .borderRadius(19)
+      .onClick(() => this.onStartImageCertification?.())
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 16, bottom: 15 })
@@ -493,6 +577,65 @@ export struct MyPage {
     .border({ width: 1, color: '#E1E9DF' })
     .borderRadius(14)
     .margin({ left: 22, right: 22, bottom: 18 })
+  }
+
+  /** 日常低碳任务列表：完成条件显示在按钮旁，未满足时不可领取。 */
+  @Builder
+  private DailyTaskRow(task: DailyTask) {
+    Row({ space: 10 }) {
+      Row()
+        .width(32)
+        .height(32)
+        .borderRadius(16)
+        .backgroundColor(this.taskClaimed(task) ? '#DDE9DF' : '#EDF3E9')
+      Column({ space: 3 }) {
+        Text(task.title)
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor('#365C4B')
+        Text(task.description)
+          .fontSize(11)
+          .fontColor('#839087')
+          .maxLines(1)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Button(this.taskClaimed(task) ? '已完成' : `领取 +${task.points}`, { type: ButtonType.Capsule, stateEffect: true })
+        .height(32)
+        .fontSize(12)
+        .fontColor(this.taskClaimed(task) || !this.taskReady(task) ? '#8B968E' : '#FFFFFF')
+        .backgroundColor(this.taskClaimed(task) || !this.taskReady(task) ? '#E2EAE3' : '#4C9576')
+        .enabled(!this.taskClaimed(task) && this.taskReady(task))
+        .onClick((): void => { this.claimDailyTask(task); })
+    }
+    .width('100%')
+    .padding({ left: 14, right: 14, top: 10, bottom: 10 })
+    .backgroundColor('#FAFBF6')
+    .border({ width: 1, color: '#E1E9DF' })
+    .borderRadius(12)
+  }
+
+  /** 两项日常任务合并成一个轻量区块，避免积分页只有签到入口。 */
+  @Builder
+  private DailyTasksCard() {
+    Column({ space: 8 }) {
+      Row() {
+        Text('今日低碳任务')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#173F2E')
+        Blank()
+        Text('完成后领取')
+          .fontSize(12)
+          .fontColor('#87938C')
+      }
+      .width('100%')
+      ForEach(this.dailyTasks, (task: DailyTask) => {
+        this.DailyTaskRow(task)
+      }, (task: DailyTask): string => task.id)
+    }
+    .width('100%')
+    .padding({ left: 22, right: 22, bottom: 18 })
   }
 
   /**
@@ -589,6 +732,7 @@ export struct MyPage {
         Column() {
           this.PointsCard()
           this.TaskCard()
+          this.DailyTasksCard()
           Column({ space: 6 }) {
             Text('兑换模拟权益')
               .fontSize(18)
@@ -617,6 +761,7 @@ export struct MyPage {
       .width('100%')
       .layoutWeight(1)
       .scrollBar(BarState.Off)
+      .contentEndOffset(190)
     }
     .width('100%')
     .height('100%')
@@ -1092,7 +1237,7 @@ export struct MyPage {
             })
           }
           .width('100%')
-          .padding({ bottom: 150 })
+          .padding({ bottom: 220 })
         }
         .width('100%')
         .height('100%')

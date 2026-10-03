@@ -46,6 +46,8 @@ struct Index {
   @State private savedDrafts: RecordDraft[] = [];
   /** 当前打开的已保存日记下标；-1 表示没有打开详情。 */
   @State private openedDiaryIndex: number = -1;
+  /** 当前打开的演示日记草稿；演示数据只存在于详情页，不写入真实记录。 */
+  @State private openedPreviewDraft: RecordDraft | undefined = undefined;
   /** 当前是否处于已保存日记详情页。 */
   @State private viewingDiary: boolean = false;
   /** 当前编辑的已保存日记下标；新建记录时为 -1。 */
@@ -64,6 +66,24 @@ struct Index {
   /** 组件即将出现：从本地存储恢复上次会话保存的日记记录。 */
   aboutToAppear(): void {
     this.loadSavedDrafts();
+    if (!this.previewMode) {
+      this.restoreLoginSession();
+    }
+  }
+
+  /** 冷启动恢复最近一次成功登录的用户，避免把登录页误认为记录丢失。 */
+  private async restoreLoginSession(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const user = await this.authService.restoreSession(context);
+      if (user !== undefined) {
+        AppStorage.setOrCreate<string>('loginUserId', user.userId);
+        AppStorage.setOrCreate<string>('loginDisplayName', user.displayName);
+        this.loggedIn = true;
+      }
+    } catch (error) {
+      // 无会话时保留登录页，不影响本地记录读取。
+    }
   }
 
   /**
@@ -93,6 +113,11 @@ struct Index {
   private async rewardSavedRecord(draft: RecordDraft): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      if (draft.verificationKind === 'ai_assisted' && draft.imageHash !== undefined && draft.imageHash.length > 0) {
+        await this.pointsService.rewardAiImageRecord(context, draft.operationId ?? '', draft.imageHash,
+          draft.reductionKg, draft.riskFlags ?? []);
+        return;
+      }
       await this.pointsService.rewardVerifiedRecord(context, draft.operationId ?? '',
         draft.verificationStatus === 'verified', draft.scoreEnabled, draft.evidenceSource, draft.reductionKg);
     } catch (error) {
@@ -105,6 +130,9 @@ struct Index {
    * @returns 打开的草稿；下标越界（未打开详情）时为 undefined
    */
   private openedDraft(): RecordDraft | undefined {
+    if (this.openedPreviewDraft !== undefined) {
+      return this.openedPreviewDraft;
+    }
     // 下标无效表示没有打开详情
     if (this.openedDiaryIndex < 0 || this.openedDiaryIndex >= this.savedDrafts.length) {
       return undefined;
@@ -114,21 +142,20 @@ struct Index {
 
   /**
    * 打开一条日记详情
-   * 首次打开内置示例记录时先转为真实草稿追加进列表并隐藏原示例；
+   * 打开内置示例记录时只在详情页展示并隐藏原示例，不写入真实账本；
    * 已保存记录按 id 中的下标直接定位。
    * @param id 记录 id（'saved-下标' 或 'preview-xxx'）
    */
   private openDiary(id: string): void {
-    // 内置示例记录：转为真实草稿后打开，同时从首页隐藏该示例
+    // 内置示例记录：单独保存详情状态，同时从首页隐藏该示例
     if (!id.startsWith('saved-')) {
       const preview: RecordDraft | undefined = this.previewDraft(id);
       if (preview === undefined) {
         return;
       }
-      const nextIndex: number = this.savedDrafts.length;
-      this.savedDrafts = [...this.savedDrafts, preview];
       this.hiddenPreviewIds = [...this.hiddenPreviewIds, id];
-      this.openedDiaryIndex = nextIndex;
+      this.openedPreviewDraft = preview;
+      this.openedDiaryIndex = -1;
       this.viewingDiary = true;
       return;
     }
@@ -150,34 +177,39 @@ struct Index {
    * @returns 对应的草稿数据；未知 id 返回 undefined
    */
   private previewDraft(id: string): RecordDraft | undefined {
+    const todayAt = (hour: number, minute: number): number => {
+      const date: Date = new Date();
+      date.setHours(hour, minute, 0, 0);
+      return date.getTime();
+    };
     if (id === 'preview-walk') {
       return {
-        recordId: 'preview-walk-record', createdAt: Date.now() - 3600000, updatedAt: Date.now() - 3600000,
+        recordId: 'preview-walk-record', createdAt: todayAt(8, 10), updatedAt: todayAt(8, 10), recordedAt: todayAt(8, 10),
         behavior: { id: 'walk', name: '步行', icon: $r('app.media.diary_walk') },
         amount: 1.2, unit: '公里', reductionKg: 0.25,
         note: '绕过操场，顺便看看早晨的树影。', hasPhoto: false,
-        evidenceSource: 'location', verificationStatus: 'verified',
-        evidenceId: 'preview-location-walk', scoreEnabled: true
+        evidenceSource: 'manual', verificationStatus: 'pending',
+        evidenceId: 'preview-only', scoreEnabled: false
       };
     }
     if (id === 'preview-meal') {
       return {
-        recordId: 'preview-meal-record', createdAt: Date.now() - 1800000, updatedAt: Date.now() - 1800000,
+        recordId: 'preview-meal-record', createdAt: todayAt(12, 20), updatedAt: todayAt(12, 20), recordedAt: todayAt(12, 20),
         behavior: { id: 'meal', name: '光盘行动', icon: $r('app.media.diary_meal') },
         amount: 1, unit: '份', reductionKg: 0.18,
         note: '吃完了，也没有浪费。', hasPhoto: false,
         evidenceSource: 'manual', verificationStatus: 'pending',
-        evidenceId: 'preview-manual-meal', scoreEnabled: false
+        evidenceId: 'preview-only', scoreEnabled: false
       };
     }
     if (id === 'preview-bike') {
       return {
-        recordId: 'preview-bike-record', createdAt: Date.now() - 900000, updatedAt: Date.now() - 900000,
+        recordId: 'preview-bike-record', createdAt: todayAt(17, 40), updatedAt: todayAt(17, 40), recordedAt: todayAt(17, 40),
         behavior: { id: 'bike', name: '骑行', icon: $r('app.media.diary_bike') },
         amount: 2.4, unit: '公里', reductionKg: 0.83,
         note: '晚风很舒服，今天慢一点也很好。', hasPhoto: true,
-        evidenceSource: 'health', verificationStatus: 'verified',
-        evidenceId: 'preview-health-bike', scoreEnabled: true
+        evidenceSource: 'manual', verificationStatus: 'pending',
+        evidenceId: 'preview-only', scoreEnabled: false
       };
     }
     return undefined;
@@ -193,6 +225,7 @@ struct Index {
       if (this.activeTab === '成长' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
         KnowledgeCenter({
           selectedTab: this.activeTab,
+          savedDrafts: this.savedDrafts,
           onNavigate: (tab: string) => {
             this.activeTab = tab;
           }
@@ -213,6 +246,10 @@ struct Index {
             this.savedDrafts = records;
             this.persistAllDrafts(records);
           },
+          onStartImageCertification: () => {
+            this.activeTab = '日记';
+            this.pickingBehavior = true;
+          },
           onNavigate: (tab: string) => {
             if (tab === '我的') {
               return;
@@ -226,21 +263,29 @@ struct Index {
           onBack: () => {
             this.viewingDiary = false;
             this.openedDiaryIndex = -1;
+            this.openedPreviewDraft = undefined;
           },
           onEdit: () => {
-            this.selectedBehavior = this.savedDrafts[this.openedDiaryIndex].behavior;
-            this.editingSavedIndex = this.openedDiaryIndex;
+            const current: RecordDraft | undefined = this.openedDraft();
+            if (current === undefined) {
+              return;
+            }
+            this.selectedBehavior = current.behavior;
+            this.editingSavedIndex = this.openedPreviewDraft === undefined ? this.openedDiaryIndex : -1;
             this.viewingDiary = false;
             this.editingRecord = true;
           },
           onDelete: () => {
             const current: RecordDraft | undefined = this.openedDraft();
-            if (current !== undefined) {
+            if (current !== undefined && this.openedPreviewDraft === undefined) {
               this.removeDraft(current.recordId ?? current.operationId ?? '');
             }
-            this.savedDrafts = this.savedDrafts.filter((_item: RecordDraft, index: number) => index !== this.openedDiaryIndex);
+            if (this.openedPreviewDraft === undefined) {
+              this.savedDrafts = this.savedDrafts.filter((_item: RecordDraft, index: number) => index !== this.openedDiaryIndex);
+            }
             this.viewingDiary = false;
             this.openedDiaryIndex = -1;
+            this.openedPreviewDraft = undefined;
           }
         })
       } else if (this.editingRecord && this.selectedBehavior !== undefined) {
@@ -270,6 +315,7 @@ struct Index {
             this.editingRecord = false;
             this.selectedBehavior = undefined;
             this.editingSavedIndex = -1;
+            this.openedPreviewDraft = undefined;
           }
         })
       } else if (this.pickingBehavior) {

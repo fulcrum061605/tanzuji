@@ -35,10 +35,11 @@ class PreviewDiaryDraft implements RecordDraft {
   reductionKg: number = 0.42;
   note: string = '今天骑行去了图书馆，路上的风很舒服。比起开车，骑行让我更慢地观察校园，也让我发现低碳生活其实可以很自然。\n\n在图书馆待了两个多小时，读完了一本一直想看的书。安静的环境让我更专注，也感受到知识带来的踏实。\n\n回来的路上，夕阳透过树叶洒在路面上，整条路都显得很温柔。这样的出行方式，不仅让自己心情更好，也让城市多了一点清新的空气。';
   hasPhoto: boolean = true;
-  evidenceSource: 'location' | 'health' | 'manual' = 'health';
-  verificationStatus: 'verified' | 'pending' = 'verified';
-  evidenceId: string = 'preview-health-001';
-  scoreEnabled: boolean = true;
+  // 预览数据不能伪装成系统核验记录，避免答辩时把演示数据误认为真实证据。
+  evidenceSource: 'location' | 'health' | 'manual' = 'manual';
+  verificationStatus: 'verified' | 'pending' = 'pending';
+  evidenceId: string = 'preview-only';
+  scoreEnabled: boolean = false;
 }
 
 /**
@@ -123,6 +124,9 @@ export struct DiaryDetail {
    * @returns 核验状态文案
    */
   private verificationLabel(): string {
+    if (this.draft.verificationKind === 'ai_assisted') {
+      return this.draft.aiStatus === 'rejected' ? '图片认证未通过' : 'AI 辅助核验，不计正式减排';
+    }
     if (this.draft.verificationStatus === 'verified') {
       return this.draft.evidenceSource === 'health' ? '华为运动已核验' : '系统轨迹已核验';
     }
@@ -135,6 +139,10 @@ export struct DiaryDetail {
    * @returns 数量来源说明文案
    */
   private evidenceText(): string {
+    if (this.draft.verificationKind === 'ai_assisted') {
+      const confidence: string = `${Math.round((this.draft.aiConfidence ?? 0) * 100)}%`;
+      return `数量来源：华为端侧 OCR 草稿（识别置信度 ${confidence}）`;
+    }
     if (this.draft.evidenceSource === 'health') {
       return '数量来源：华为运动授权数据（步数换算，估算）';
     }
@@ -319,6 +327,12 @@ export struct DiaryDetail {
           .fontSize(13)
           .fontColor('#7A9489')
           .width('100%')
+        if ((this.draft.riskFlags ?? []).length > 0) {
+          Text(`图片认证提示：${(this.draft.riskFlags ?? []).join('、')}`)
+            .fontSize(12)
+            .fontColor('#A27A53')
+            .width('100%')
+        }
         Text(`核算依据：${CARBON_FACTOR_CATALOG_SOURCE}`)
           .fontSize(11)
           .fontColor('#9AA8A1')

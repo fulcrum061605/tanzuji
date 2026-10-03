@@ -232,6 +232,26 @@ export struct Home {
     });
   }
 
+  /** 将可见列表分成真实记录和内置演示记录，避免两类数据在视觉上混为一谈。 */
+  private realEntries(entries: DiaryEntry[]): DiaryEntry[] {
+    return entries.filter((entry: DiaryEntry): boolean => !entry.id.startsWith('preview-'));
+  }
+
+  /** 当前日期与搜索条件下仍可见的演示记录。 */
+  private previewEntries(entries: DiaryEntry[]): DiaryEntry[] {
+    return entries.filter((entry: DiaryEntry): boolean => entry.id.startsWith('preview-'));
+  }
+
+  /** 当前筛选条件下可见的真实记录。 */
+  private visibleRealEntries(): DiaryEntry[] {
+    return this.realEntries(this.filteredEntries());
+  }
+
+  /** 当前筛选条件下可见的演示记录。 */
+  private visiblePreviewEntries(): DiaryEntry[] {
+    return this.previewEntries(this.filteredEntries());
+  }
+
   /** 判断两个时间戳是否属于同一自然日。 */
   private sameDay(leftTimestamp: number, rightTimestamp: number): boolean {
     const left: Date = new Date(leftTimestamp);
@@ -259,6 +279,26 @@ export struct Home {
       }
     });
     return total.toFixed(2);
+  }
+
+  /** 首页无记录或搜索无结果时的明确空状态。 */
+  @Builder
+  private EmptyState() {
+    Column({ space: 10 }) {
+      Image($r('app.media.diary_leaf'))
+        .syncLoad(true)
+        .width(42)
+        .height(42)
+        .opacity(0.55)
+      Text(this.searchText.trim().length > 0 ? '没找到相关记录，换个关键词试试' :
+        (this.isTodaySelected() ? '今天还没有记录，点下面的 + 记一笔' : '这一天还没有可查看的记录'))
+        .fontSize(15)
+        .fontColor('#718078')
+        .textAlign(TextAlign.Center)
+    }
+    .width('100%')
+    .layoutWeight(1)
+    .justifyContent(FlexAlign.Center)
   }
 
   /**
@@ -422,20 +462,12 @@ export struct Home {
       }
       .width('100%')
 
-      // 上层：居中的日期按钮（带下拉箭头，点击同样打开日历）
+      // 上层：居中的日期按钮，整块区域都打开系统日历
       Button({ type: ButtonType.Normal }) {
-        Row({ space: 7 }) {
-          // 当前选中日期
-          Text(this.formatDate(this.selectedDate))
-            .fontSize(20)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#123D2D')
-          // 展开指示箭头
-          Image($r('app.media.diary_chevron'))
-            .syncLoad(true)
-            .width(17)
-            .height(17)
-        }
+        Text(this.formatDate(this.selectedDate))
+          .fontSize(20)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#123D2D')
       }
       .height(48)
       .padding({ left: 12, right: 12 })
@@ -450,7 +482,7 @@ export struct Home {
 
     // 今日减排概览：富文本拼接"记录数 + 估算减排量"，数值部分加深加粗
     Text() {
-      Span(`${this.isTodaySelected() ? '今天' : this.formatDate(this.selectedDate)} ${this.entryCount()} 条记录 · 估算减排 `)
+      Span(`${this.isTodaySelected() ? '今天' : this.formatDate(this.selectedDate)} ${this.entryCount()} 条真实记录 · 估算减排 `)
         .fontColor('#738078')
       Span(`${this.reductionTotal()} kg`)
         .fontColor('#163D2F')
@@ -746,24 +778,48 @@ export struct Home {
         // 顶部区域：日期、日历/搜索入口与今日概览
         this.Header()
 
-        // 日记列表：占据剩余高度，可滚动
-        List({ space: 0 }) {
-          // 使用稳定的记录 id 作为键；分隔线由 List 统一绘制。
-          ForEach(this.filteredEntries(), (entry: DiaryEntry) => {
-            ListItem() {
-              this.EntryRow(entry)
+        if (this.filteredEntries().length === 0) {
+          this.EmptyState()
+        } else {
+          // 日记列表：占据剩余高度，可滚动；演示记录单独加分组标题。
+          List({ space: 0 }) {
+            ForEach(this.visibleRealEntries(), (entry: DiaryEntry) => {
+              ListItem() {
+                this.EntryRow(entry)
+              }
+            }, (entry: DiaryEntry) => entry.id)
+            if (this.visiblePreviewEntries().length > 0) {
+              ListItem() {
+                Row() {
+                  Text('演示示例')
+                    .fontSize(13)
+                    .fontWeight(FontWeight.Medium)
+                    .fontColor('#718078')
+                  Blank()
+                  Text('不计入真实记录与积分')
+                    .fontSize(12)
+                    .fontColor('#A0804A')
+                }
+                .width('100%')
+                .padding({ top: 15, bottom: 7, left: 4, right: 4 })
+              }
             }
-          }, (entry: DiaryEntry) => entry.id)
+            ForEach(this.visiblePreviewEntries(), (entry: DiaryEntry) => {
+              ListItem() {
+                this.EntryRow(entry)
+              }
+            }, (entry: DiaryEntry) => entry.id)
+          }
+          .width('100%')
+          .constraintSize({ maxWidth: this.wideLayout ? 1320 : 10000 })
+          .alignSelf(ItemAlign.Center)
+          .layoutWeight(1)
+          .padding({ left: 20, right: 20 })
+          .divider({ strokeWidth: 0.5, color: '#DBE2D8' })
+          .contentEndOffset(220)
+          .scrollBar(BarState.Off)
+          .edgeEffect(EdgeEffect.Spring)
         }
-        .width('100%')
-        .constraintSize({ maxWidth: this.wideLayout ? 1320 : 10000 })
-        .alignSelf(ItemAlign.Center)
-        .layoutWeight(1)
-        .padding({ left: 20, right: 20 })
-        .divider({ strokeWidth: 0.5, color: '#DBE2D8' })
-        .contentEndOffset(174)
-        .scrollBar(BarState.Off)
-        .edgeEffect(EdgeEffect.Spring)
       }
       .width('100%')
       .height('100%')

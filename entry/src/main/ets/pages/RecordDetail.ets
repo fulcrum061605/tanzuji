@@ -4,7 +4,7 @@
  * 查看即时减排估算，并可补充文字与图片，最后保存为一条记录草稿（RecordDraft）。
  * 图片通过系统相册 PhotoViewPicker 选择并保存用户授权的 URI，
  * 减排系数是公开数据的近似简化值，仅供记录参考；保存结果经 onSave 回调交给父组件，
- * 入口页目前仅返回首页，草稿数据待接入本地存储后启用。
+ * 入口页负责把记录写入本地 Preferences，并在首页、足迹和我的页面复用同一份数据。
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览；文末提供独立 @Preview 预览入口。
  */
 import { BehaviorOption } from './BehaviorPicker';
@@ -12,9 +12,10 @@ import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenceService';
 import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
+import { AiRecognitionDraft, OnDeviceAiService } from '../services/OnDeviceAiService';
 
 /**
- * 保存给日记首页或后续本地存储使用的记录草稿。
+ * 保存给日记首页、足迹和我的页面使用的本地记录草稿。
  */
 export interface RecordDraft {
   /** 稳定的本地记录主键，不依赖数组下标。 */
@@ -48,6 +49,25 @@ export interface RecordDraft {
   evidenceId: string;
   /** 是否允许计入积分和正式碳足迹。 */
   scoreEnabled: boolean;
+  /** 核验层级：系统数据、AI 辅助图片或手动记录。旧记录缺失时按 manual 处理。 */
+  verificationKind?: 'system' | 'ai_assisted' | 'manual';
+  /** AI 服务名称，例如 CoreVisionKit.OCR。 */
+  aiProvider?: string;
+  /** AI 草稿状态：未使用、已生成、已确认或被拒绝。 */
+  aiStatus?: 'none' | 'draft' | 'confirmed' | 'rejected';
+  /** 本地规则计算的识别置信度，不代表图片真实性。 */
+  aiConfidence?: number;
+  /** AI 识别时使用的低碳行为名称。 */
+  aiRecognizedBehavior?: string;
+  /** AI 从图片解析出的距离数量。 */
+  aiRecognizedAmount?: number;
+  /** AI 解析出的距离单位（'公里'/'米'）。 */
+  aiRecognizedUnit?: string;
+  /** AI 识别完成的时间（毫秒时间戳）。 */
+  aiRecognizedAt?: number;
+  /** 图片摘要和风险标记，用于本机重复拦截和答辩追溯。 */
+  imageHash?: string;
+  riskFlags?: string[];
 }
 
 /**
@@ -87,7 +107,7 @@ export struct RecordDetail {
   behavior: BehaviorOption = new DefaultBikeBehavior();
   /** 返回行为选择页回调：由父组件注入（入口页实现为退回选择页重选行为），未注入时点击无动作 */
   onBack?: () => void;
-  /** 保存记录回调：携带整理好的 RecordDraft，由父组件决定去向（当前入口仅返回首页） */
+  /** 保存记录回调：携带整理好的 RecordDraft，由入口页写入本地记录并返回首页。 */
   onSave?: (draft: RecordDraft) => void;
   /** 编辑已有记录时传入原草稿；新建记录时为空。 */
   initialDraft?: RecordDraft;
@@ -114,10 +134,22 @@ export struct RecordDetail {
   @State private measurementMessage: string = '';
   /** 是否正在进行系统定位测量 */
   @State private tracking: boolean = false;
+  /** AI 图片辅助认证状态；只用于草稿和受限积分，不改变正式核验状态。 */
+  @State private aiStatus: 'none' | 'draft' | 'confirmed' | 'rejected' = 'none';
+  @State private aiProvider: string = '';
+  @State private aiConfidence: number = 0;
+  @State private aiRecognizedBehavior: string = '';
+  @State private aiRecognizedAmount: number = 0;
+  @State private aiRecognizedUnit: string = '';
+  @State private aiRecognizedAt: number = 0;
+  @State private imageHash: string = '';
+  @State private riskFlags: string[] = [];
   /** 证据服务实例：负责定位轨迹测量与华为运动数据读取 */
   private evidenceService: CarbonEvidenceService = new CarbonEvidenceService();
   /** 碳因子服务：统一提供减排系数、计算与口径来源 */
   private factorService: CarbonFactorService = new CarbonFactorService();
+  /** 端侧 OCR 和本地风险规则服务。 */
+  private aiService: OnDeviceAiService = new OnDeviceAiService();
 
   /**
    * 判断当前行为是否需要系统自动测量
@@ -141,6 +173,15 @@ export struct RecordDetail {
       this.evidenceSource = this.initialDraft.evidenceSource;
       this.verificationStatus = this.initialDraft.verificationStatus;
       this.evidenceId = this.initialDraft.evidenceId;
+      this.aiStatus = this.initialDraft.aiStatus ?? 'none';
+      this.aiProvider = this.initialDraft.aiProvider ?? '';
+      this.aiConfidence = this.initialDraft.aiConfidence ?? 0;
+      this.aiRecognizedBehavior = this.initialDraft.aiRecognizedBehavior ?? '';
+      this.aiRecognizedAmount = this.initialDraft.aiRecognizedAmount ?? 0;
+      this.aiRecognizedUnit = this.initialDraft.aiRecognizedUnit ?? '';
+      this.aiRecognizedAt = this.initialDraft.aiRecognizedAt ?? 0;
+      this.imageHash = this.initialDraft.imageHash ?? '';
+      this.riskFlags = this.initialDraft.riskFlags ?? [];
       this.measurementMessage = this.initialDraft.verificationStatus === 'verified'
         ? '已由系统测量，数量不可手动修改' : '待核实记录，不计入正式碳积分';
       return;
@@ -274,8 +315,12 @@ export struct RecordDetail {
    */
   private save(): void {
     const amount: number = this.amount();
-    // 自动行为必须来自真实测量，且距离至少 50 米；手动行为永远待核实。
-    if (amount <= 0 || (this.isAutoMeasured() &&
+    // 自动行为必须来自系统测量，或已经完成 AI 图片草稿确认；两者都不能由输入框伪造。
+    if (this.evidenceSource === 'ai_image' && this.aiStatus === 'draft') {
+      this.aiStatus = 'confirmed';
+    }
+    const aiConfirmed: boolean = this.evidenceSource === 'ai_image' && this.aiStatus === 'confirmed';
+    if (amount <= 0 || (this.isAutoMeasured() && !aiConfirmed &&
       (amount <= 0.05 || this.verificationStatus !== 'verified' ||
         (this.evidenceSource !== 'location' && this.evidenceSource !== 'health')))) {
       return;
@@ -285,7 +330,8 @@ export struct RecordDetail {
     }
     const now: number = Date.now();
     const evidenceSource: EvidenceSource = this.isAutoMeasured() ? this.evidenceSource : 'manual';
-    const verificationStatus: 'verified' | 'pending' = this.isAutoMeasured() ? this.verificationStatus : 'pending';
+    const verificationStatus: 'verified' | 'pending' = aiConfirmed ? 'pending' :
+      (this.isAutoMeasured() ? this.verificationStatus : 'pending');
     this.onSave?.({
       recordId: this.initialDraft?.recordId ?? `${this.behavior.id}-${now}-${Math.floor(Math.random() * 100000)}`,
       operationId: this.initialDraft?.operationId ?? `${this.behavior.id}-${Date.now()}`,
@@ -302,7 +348,18 @@ export struct RecordDetail {
       evidenceSource: evidenceSource,
       verificationStatus: verificationStatus,
       evidenceId: this.evidenceId,
-      scoreEnabled: verificationStatus === 'verified' && evidenceSource !== 'manual'
+      scoreEnabled: verificationStatus === 'verified' && evidenceSource !== 'manual' && evidenceSource !== 'ai_image',
+      verificationKind: evidenceSource === 'ai_image' ? 'ai_assisted' :
+        (evidenceSource === 'manual' ? 'manual' : 'system'),
+      aiProvider: this.aiProvider,
+      aiStatus: this.aiStatus,
+      aiConfidence: this.aiConfidence,
+      aiRecognizedBehavior: this.aiRecognizedBehavior,
+      aiRecognizedAmount: this.aiRecognizedAmount,
+      aiRecognizedUnit: this.aiRecognizedUnit,
+      aiRecognizedAt: this.aiRecognizedAt,
+      imageHash: this.imageHash,
+      riskFlags: this.riskFlags
     });
   }
 
@@ -385,8 +442,9 @@ export struct RecordDetail {
   /**
    * 打开系统相册选择一张图片，并保存系统授予的持久化 URI。
    * PhotoViewPicker 由系统处理权限，不在应用内自行申请图库读权限。
+   * @param runAi 是否在选图成功后立即调用端侧 OCR 识别（"上传图片认证"入口为 true）
    */
-  private async choosePhoto(): Promise<void> {
+  private async choosePhoto(runAi: boolean = false): Promise<void> {
     try {
       const picker: photoAccessHelper.PhotoViewPicker = new photoAccessHelper.PhotoViewPicker();
       const result: photoAccessHelper.PhotoSelectResult = await picker.select({
@@ -398,6 +456,9 @@ export struct RecordDetail {
       if (uri !== undefined && uri.length > 0) {
         this.photoUri = uri;
         this.hasPhoto = true;
+        if (runAi) {
+          await this.recognizePhoto(uri);
+        }
       }
     } catch (error) {
       try {
@@ -405,6 +466,37 @@ export struct RecordDetail {
       } catch (toastError) {
         // 系统相册取消或不可用时，不影响其他记录内容。
       }
+    }
+  }
+
+  /**
+   * 调用端侧 OCR 识别选中的图片
+   * 识别成功后仅填充草稿（数量、单位、置信度与风险标记），证据来源切换为 ai_image、
+   * 核验状态保持待核实；最终仍需用户点击保存确认。
+   * @param uri 系统相册授权的图片 URI
+   */
+  private async recognizePhoto(uri: string): Promise<void> {
+    this.measurementMessage = '正在使用华为端侧 OCR 识别图片……';
+    const result: AiRecognitionDraft = await this.aiService.recognize(uri, this.behavior.name);
+    this.aiProvider = result.provider;
+    this.aiConfidence = result.confidence;
+    this.aiRecognizedBehavior = result.recognizedBehavior;
+    this.aiRecognizedAmount = result.amount;
+    this.aiRecognizedUnit = result.unit;
+    this.aiRecognizedAt = Date.now();
+    this.imageHash = result.imageHash;
+    this.riskFlags = result.riskFlags;
+    this.aiStatus = result.amount > 0 ? 'draft' : 'rejected';
+    this.evidenceSource = 'ai_image';
+    this.verificationStatus = 'pending';
+    if (result.amount > 0 && result.unit.length > 0) {
+      this.amountText = result.amount.toString();
+      this.selectedUnit = result.unit;
+    }
+    if (result.riskFlags.length === 0) {
+      this.measurementMessage = '识别完成，请确认行为和数量后保存；本条为 AI 辅助核验';
+    } else {
+      this.measurementMessage = `识别完成：${result.riskFlags.join('、')}，请确认后保存`;
     }
   }
 
@@ -755,15 +847,27 @@ export struct RecordDetail {
         .height(58)
         .padding(0)
         .backgroundColor(Color.Transparent)
-        .onClick(() => { this.choosePhoto(); })
+        .onClick(() => { this.choosePhoto(false); })
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+
+      Button({ type: ButtonType.Normal, stateEffect: false }) {
+        Text('上传图片认证')
+          .fontSize(14)
+          .fontColor('#FFFFFF')
+      }
+      .width('100%')
+      .height(38)
+      .padding(0)
+      .backgroundColor('#4C9576')
+      .borderRadius(19)
+      .onClick(() => { this.choosePhoto(true); })
     }
     // 卡片外观：与行为卡片一致的纸感浅底细描边
     .width('100%')
     .padding({ left: 14, right: 14, top: 15, bottom: 14 })
-    .height(218)
+    .height(264)
     .backgroundColor('#FAFBF6')
     .border({ width: 1, color: '#DDE8DE' })
     .borderRadius(14)

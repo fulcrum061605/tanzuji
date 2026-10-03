@@ -72,7 +72,20 @@ export class DiaryStorageService {
       evidenceSource: value.evidenceSource ?? 'manual',
       verificationStatus: value.verificationStatus === 'verified' ? 'verified' : 'pending',
       evidenceId: value.evidenceId ?? '',
-      scoreEnabled: value.scoreEnabled === true
+      scoreEnabled: value.scoreEnabled === true,
+      verificationKind: value.verificationKind === 'system' || value.verificationKind === 'ai_assisted'
+        ? value.verificationKind : 'manual',
+      aiProvider: typeof value.aiProvider === 'string' ? value.aiProvider : '',
+      aiStatus: value.aiStatus === 'draft' || value.aiStatus === 'confirmed' || value.aiStatus === 'rejected'
+        ? value.aiStatus : 'none',
+      aiConfidence: Math.max(0, Math.min(1, Number(value.aiConfidence) || 0)),
+      aiRecognizedBehavior: typeof value.aiRecognizedBehavior === 'string' ? value.aiRecognizedBehavior : '',
+      aiRecognizedAmount: Math.max(0, Number(value.aiRecognizedAmount) || 0),
+      aiRecognizedUnit: typeof value.aiRecognizedUnit === 'string' ? value.aiRecognizedUnit : '',
+      aiRecognizedAt: Number(value.aiRecognizedAt) || 0,
+      imageHash: typeof value.imageHash === 'string' ? value.imageHash : '',
+      riskFlags: Array.isArray(value.riskFlags)
+        ? value.riskFlags.filter((item: string): boolean => item.length > 0) : []
     };
   }
 

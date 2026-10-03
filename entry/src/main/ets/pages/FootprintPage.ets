@@ -1,6 +1,6 @@
 /**
  * 足迹数据看板。
- * 采用环形进度、时序柱状图、行为构成条形图与核验概览组合，
+ * 采用环形进度、折线图、时序柱状图、行为构成条形图、分类占比饼图与核验概览组合，
  * 支持日、周、月、年四种时间口径；正式汇总只接收已核验记录。
  */
 import { RecordDraft } from './RecordDetail';
@@ -17,7 +17,7 @@ function isGlassCapable(): boolean {
   return deviceInfo.sdkApiVersion >= 26 && uiMaterial.isImmersiveMaterialSupported();
 }
 
-/** 时序柱状图的单个数据点（横轴标签 + 减排值） */
+/** 时序图（柱状图与折线图共用）的单个数据点（横轴标签 + 减排值） */
 interface TrendPoint {
   /** 横轴标签（如 '6时'/'一'/'第1周'/'1月'） */
   label: string;
@@ -47,7 +47,7 @@ interface FootprintData {
   comparison: string;
   /** 时序柱状图标题（如 '本周每日减排'） */
   trendTitle: string;
-  /** 时序柱状图数据点 */
+  /** 时序图数据点（柱状图与折线图共用同一组） */
   trend: TrendPoint[];
   /** 行为构成类目列表 */
   categories: CategoryPoint[];
@@ -66,7 +66,8 @@ const PERIODS: string[] = ['日', '周', '月', '年'];
 
 /**
  * 足迹看板组件
- * 页面结构：标题栏 + 时间口径切换 + 减排概览（环形进度） + 时序柱状图 + 行为构成 + 核验与等效 + 底部导航。
+ * 页面结构：标题栏 + 时间口径切换 + 减排概览（环形进度） + 折线图 + 时序柱状图 +
+ * 行为构成条形图 + 分类占比饼图 + 核验与等效 + 底部导航。
  * 看板数据全部由本地已核验记录按所选时间口径动态聚合，无静态示例基线。
  */
 @Component
@@ -88,6 +89,9 @@ export struct FootprintPage {
       materialColor: '#59E6EEDF'
     })
     : undefined;
+  /** 折线图与饼图各自使用独立 Canvas，避免一个绘图上下文被多个组件复用。 */
+  private lineContext: CanvasRenderingContext2D = new CanvasRenderingContext2D();
+  private pieContext: CanvasRenderingContext2D = new CanvasRenderingContext2D();
 
   /**
    * 当前时间口径对应的看板数据
@@ -137,10 +141,10 @@ export struct FootprintPage {
   }
 
   /**
-   * 按时间口径把已核验记录聚合为时序柱状图数据点
+   * 按时间口径把已核验记录聚合为时序图数据点（柱状图与折线图共用）
    * 日按 6 个时段、周按 7 天、月按 4 周、年按 12 个月分桶累计减排量
    * @param records 当前时间口径内的已核验记录
-   * @returns 时序柱状图数据点数组
+   * @returns 时序图数据点数组
    */
   private buildTrend(records: RecordDraft[]): TrendPoint[] {
     const count: number = this.selectedPeriod === '日' ? 6 : this.selectedPeriod === '周' ? 7 :
@@ -234,8 +238,8 @@ export struct FootprintPage {
   }
 
   /**
-   * 时序柱状图的最大值
-   * 用于柱高归一化；保底 1 防止除零
+   * 时序图（柱状图与折线图）的最大值
+   * 用于柱高与折线纵坐标归一化；保底 1 防止除零
    * @returns 数据点中的最大减排值
    */
   private maxTrendValue(): number {
@@ -266,6 +270,81 @@ export struct FootprintPage {
    */
   private categoryPercent(item: CategoryPoint): number {
     return this.categoryTotal() === 0 ? 0 : item.value / this.categoryTotal() * 100;
+  }
+
+  /**
+   * 在 Canvas 上绘制所选时间口径的折线趋势
+   * 先画 3 条横向网格线，再绘制绿色折线与金色数据点；无数据时只保留坐标网格。
+   */
+  private drawLineChart(): void {
+    const context: CanvasRenderingContext2D = this.lineContext;
+    const width: number = context.width > 0 ? context.width : 320;
+    const height: number = context.height > 0 ? context.height : 132;
+    context.clearRect(0, 0, width, height);
+    context.strokeStyle = '#DCE7DD';
+    context.lineWidth = 1;
+    for (let row: number = 1; row <= 3; row++) {
+      const y: number = row * height / 4;
+      context.beginPath();
+      context.moveTo(8, y);
+      context.lineTo(width - 8, y);
+      context.stroke();
+    }
+    const trend: TrendPoint[] = this.data().trend;
+    if (this.data().verifiedCount === 0 || trend.length === 0) {
+      return;
+    }
+    const maximum: number = this.maxTrendValue();
+    context.beginPath();
+    trend.forEach((point: TrendPoint, index: number): void => {
+      const x: number = trend.length === 1 ? width / 2 : 12 + index * (width - 24) / (trend.length - 1);
+      const y: number = height - 12 - point.value / maximum * (height - 28);
+      if (index === 0) {
+        context.moveTo(x, y);
+      } else {
+        context.lineTo(x, y);
+      }
+    });
+    context.strokeStyle = '#3E8E68';
+    context.lineWidth = 3;
+    context.stroke();
+    trend.forEach((point: TrendPoint, index: number): void => {
+      const x: number = trend.length === 1 ? width / 2 : 12 + index * (width - 24) / (trend.length - 1);
+      const y: number = height - 12 - point.value / maximum * (height - 28);
+      context.beginPath();
+      context.arc(x, y, 4, 0, Math.PI * 2);
+      context.fillStyle = '#D4A24C';
+      context.fill();
+    });
+  }
+
+  /**
+   * 在 Canvas 上绘制分类减排占比饼图
+   * 各类目按类目色扇形填充，从正上方（-π/2）起顺时针绘制；总量为零时保持空状态。
+   */
+  private drawPieChart(): void {
+    const context: CanvasRenderingContext2D = this.pieContext;
+    const width: number = context.width > 0 ? context.width : 150;
+    const height: number = context.height > 0 ? context.height : 150;
+    context.clearRect(0, 0, width, height);
+    const total: number = this.categoryTotal();
+    if (total <= 0) {
+      return;
+    }
+    const radius: number = Math.min(width, height) / 2 - 6;
+    const centerX: number = width / 2;
+    const centerY: number = height / 2;
+    let startAngle: number = -Math.PI / 2;
+    this.data().categories.forEach((item: CategoryPoint): void => {
+      const sweep: number = item.value / total * Math.PI * 2;
+      context.beginPath();
+      context.moveTo(centerX, centerY);
+      context.arc(centerX, centerY, radius, startAngle, startAngle + sweep);
+      context.closePath();
+      context.fillStyle = item.color;
+      context.fill();
+      startAngle += sweep;
+    });
   }
 
   /**
@@ -313,16 +392,18 @@ export struct FootprintPage {
       }
       .alignItems(HorizontalAlign.Start)
       Blank()
-      // 右侧：数据更新状态徽标（绿点 + 文案）
-      Row({ space: 6 }) {
-        Row().width(7).height(7).borderRadius(4).backgroundColor('#4C9576')
-        Text('数据已更新')
-          .fontSize(12)
-          .fontColor('#567064')
+      if (this.data().verifiedCount > 0) {
+        // 只有存在本地核验记录时显示更新状态，避免空数据时伪造“已更新”。
+        Row({ space: 6 }) {
+          Row().width(7).height(7).borderRadius(4).backgroundColor('#4C9576')
+          Text('数据已更新')
+            .fontSize(12)
+            .fontColor('#567064')
+        }
+        .padding({ left: 10, right: 10, top: 7, bottom: 7 })
+        .backgroundColor('#EAF3E7')
+        .borderRadius(16)
       }
-      .padding({ left: 10, right: 10, top: 7, bottom: 7 })
-      .backgroundColor('#EAF3E7')
-      .borderRadius(16)
     }
     .width('100%')
     .padding({ left: 22, right: 22, top: 12, bottom: 14 })
@@ -346,6 +427,11 @@ export struct FootprintPage {
           .borderRadius(19)
           .onClick((): void => {
             this.selectedPeriod = period;
+            // 状态更新后重绘两个 Canvas，保证切换日/周/月/年时图形同步。
+            setTimeout(() => {
+              this.drawLineChart();
+              this.drawPieChart();
+            }, 0);
           })
       }, (period: string): string => period)
     }
@@ -434,7 +520,15 @@ export struct FootprintPage {
 
       // 柱状数据点行：底部对齐，数据点多时缩小字号
       Row({ space: 5 }) {
-        ForEach(this.data().trend, (point: TrendPoint, index: number) => {
+        if (this.data().verifiedCount === 0) {
+          Text('暂无趋势数据，先去记一笔')
+            .fontSize(14)
+            .fontColor('#8A968F')
+            .height(96)
+            .layoutWeight(1)
+            .textAlign(TextAlign.Center)
+        } else {
+          ForEach(this.data().trend, (point: TrendPoint, index: number) => {
           Column({ space: 7 }) {
             // 柱顶数值：≥10 取整，否则保留 1 位小数
             Text(point.value.toFixed(point.value >= 10 ? 0 : 1))
@@ -446,7 +540,7 @@ export struct FootprintPage {
               Blank()
               Row()
                 .width('72%')
-                .height(Math.max(12, point.value / this.maxTrendValue() * 92))
+                .height(point.value <= 0 ? 0 : point.value / this.maxTrendValue() * 92)
                 .backgroundColor(index === this.data().trend.length - 1 ? '#D4A24C' : '#4C9576')
                 .borderRadius({ topLeft: 5, topRight: 5 })
             }
@@ -461,10 +555,60 @@ export struct FootprintPage {
           }
           .layoutWeight(1)
           .alignItems(HorizontalAlign.Center)
-        }, (point: TrendPoint, index: number): string => `${point.label}-${index}`)
+          }, (point: TrendPoint, index: number): string => `${point.label}-${index}`)
+        }
       }
       .width('100%')
       .alignItems(VerticalAlign.Bottom)
+    }
+    .width('100%')
+    .padding({ left: 22, right: 22, top: 24, bottom: 24 })
+    .border({ width: { bottom: 0.5 }, color: '#DBE2D8' })
+  }
+
+  /**
+   * 折线图区块
+   * Canvas 绘制的减排趋势走向，与柱状图共用同一组已核验数据；
+   * 空数据时在画布中央叠加提示文案，底部标注口径说明与"仅统计已核验记录"。
+   */
+  @Builder
+  private LineChart() {
+    Column({ space: 12 }) {
+      Row() {
+        Text('减排趋势（折线图）')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#173F2E')
+        Blank()
+        Text('kg CO₂e')
+          .fontSize(12)
+          .fontColor('#87938C')
+      }
+      .width('100%')
+      Stack({ alignContent: Alignment.Center }) {
+        Canvas(this.lineContext)
+          .width('100%')
+          .height(132)
+          .onReady((): void => this.drawLineChart())
+        if (this.data().verifiedCount === 0) {
+          Text('暂无可绘制的已核验数据')
+            .fontSize(13)
+            .fontColor('#8A968F')
+        }
+      }
+      .width('100%')
+      .height(132)
+      Row({ space: 8 }) {
+        Text(this.selectedPeriod === '日' ? '分时' : this.selectedPeriod === '周' ? '周一至周日' :
+          this.selectedPeriod === '月' ? '按周' : '按月')
+          .fontSize(12)
+          .fontColor('#87938C')
+        Blank()
+        Text('仅统计已核验记录')
+          .fontSize(12)
+          .fontColor('#9A7A3C')
+      }
+      .width('100%')
     }
     .width('100%')
     .padding({ left: 22, right: 22, top: 24, bottom: 24 })
@@ -531,6 +675,64 @@ export struct FootprintPage {
         }
         .width('100%')
       }, (item: CategoryPoint): string => item.name)
+    }
+    .width('100%')
+    .padding({ left: 22, right: 22, top: 24, bottom: 24 })
+    .border({ width: { bottom: 0.5 }, color: '#DBE2D8' })
+  }
+
+  /**
+   * 饼图区块
+   * Canvas 绘制的分类减排占比图 + 右侧图例（类目色块 + 名称与百分比）；
+   * 无分类数据时显示空状态提示。
+   */
+  @Builder
+  private PieChart() {
+    Column({ space: 14 }) {
+      Row() {
+        Text('减排行为占比（饼图）')
+          .fontSize(18)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#173F2E')
+        Blank()
+        Text('分类汇总')
+          .fontSize(12)
+          .fontColor('#87938C')
+      }
+      .width('100%')
+      if (this.data().categories.length === 0) {
+        Text('暂无分类数据，完成并核验一条行为后显示')
+          .fontSize(13)
+          .fontColor('#8A968F')
+          .height(150)
+          .width('100%')
+          .textAlign(TextAlign.Center)
+      } else {
+        Row({ space: 18 }) {
+          Canvas(this.pieContext)
+            .width(150)
+            .height(150)
+            .onReady((): void => this.drawPieChart())
+          Column({ space: 9 }) {
+            ForEach(this.data().categories, (item: CategoryPoint) => {
+              Row({ space: 7 }) {
+                Row()
+                  .width(10)
+                  .height(10)
+                  .borderRadius(5)
+                  .backgroundColor(item.color)
+                Text(`${item.name} ${Math.round(this.categoryPercent(item))}%`)
+                  .fontSize(12)
+                  .fontColor('#567064')
+              }
+            }, (item: CategoryPoint): string => `pie-${item.name}`)
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }
     }
     .width('100%')
     .padding({ left: 22, right: 22, top: 24, bottom: 24 })
@@ -710,8 +912,10 @@ export struct FootprintPage {
           this.Header()
           this.PeriodSelector()
           this.Summary()
+          this.LineChart()
           this.TrendChart()
           this.CategoryChart()
+          this.PieChart()
           this.VerificationAndImpact()
         }
         .width('100%')
