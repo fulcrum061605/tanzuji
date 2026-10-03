@@ -2,11 +2,11 @@
   "string": [
     {
       "name": "module_desc",
-      "value": "module description"
+      "value": "碳记主模块，提供低碳日记、足迹看板与碳积分能力"
     },
     {
       "name": "EntryAbility_desc",
-      "value": "description"
+      "value": "碳记应用入口，承载低碳日记、足迹看板与碳积分页面"
     },
     {
       "name": "EntryAbility_label",

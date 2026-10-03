@@ -23,5 +23,8 @@
     {"behaviorId":"shopping","unit":"件","baseUnit":"件","factor":0.06,"source":"公开近似绿色消费口径"},
     {"behaviorId":"reusable","unit":"件","baseUnit":"件","factor":0.08,"source":"公开近似重复使用口径"},
     {"behaviorId":"secondhand","unit":"件","baseUnit":"件","factor":0.20,"source":"公开近似二手流通口径"}
+  ],
+  "conversions": [
+    {"fromUnit":"步","toUnit":"公里","factor":0.0007,"source":"成人平均步幅 0.7 米/步（公开近似口径），用于华为运动步数换算"}
   ]
 }

@@ -43,8 +43,8 @@ interface FootprintData {
   total: number;
   /** 阶段目标减排量（kg CO₂e） */
   goal: number;
-  /** 环比对比文案（如 '较上周多 12%'） */
-  comparison: string;
+  /** 数据口径说明文案（如 '基于本地已核验记录动态计算'） */
+  basisNote: string;
   /** 时序柱状图标题（如 '本周每日减排'） */
   trendTitle: string;
   /** 时序图数据点（柱状图与折线图共用同一组） */
@@ -130,7 +130,7 @@ export struct FootprintPage {
       this.selectedPeriod === '月' ? 40 : 480;
     return {
       total: total, goal: goal,
-      comparison: verified.length === 0 ? '暂无已核验记录' : '基于本地已核验记录动态计算',
+      basisNote: verified.length === 0 ? '暂无已核验记录' : '基于本地已核验记录动态计算',
       trendTitle: this.selectedPeriod === '日' ? '今日减排节奏' :
         this.selectedPeriod === '周' ? '本周每日减排' : this.selectedPeriod === '月' ? '本月每周减排' : '年度减排趋势',
       trend: this.buildTrend(verified), categories: this.buildCategories(verified),
@@ -483,7 +483,7 @@ export struct FootprintPage {
             .fontColor('#567064')
             .margin({ top: 14 })
         }
-        Text(this.data().comparison)
+        Text(this.data().basisNote)
           .fontSize(13)
           .fontColor('#3E8061')
         Text(`阶段目标 ${this.data().goal.toFixed(0)} kg`)

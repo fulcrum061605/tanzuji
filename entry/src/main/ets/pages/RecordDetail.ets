@@ -11,7 +11,7 @@ import { BehaviorOption } from './BehaviorPicker';
 import { common } from '@kit.AbilityKit';
 import { photoAccessHelper } from '@kit.MediaLibraryKit';
 import { CarbonEvidenceService, EvidenceSource } from '../services/CarbonEvidenceService';
-import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE } from '../services/CarbonFactorService';
+import { CarbonFactorService, CARBON_FACTOR_CATALOG_SOURCE, STEP_TO_KM } from '../services/CarbonFactorService';
 import { AiRecognitionDraft, OnDeviceAiService } from '../services/OnDeviceAiService';
 
 /**
@@ -310,8 +310,8 @@ export struct RecordDetail {
 
   /**
    * 保存本次记录
-   * 仅当数量大于 0 时触发（保存按钮在数量无效时已禁用，此处再兜底防御），
-   * 将当前表单状态整理为 RecordDraft 经 onSave 交给父组件
+   * 自动测量行为在完成系统测量或 AI 图片确认前允许点击按钮，但由这里统一拦截并提示原因；
+   * 通过校验后将当前表单状态整理为 RecordDraft 经 onSave 交给父组件
    */
   private save(): void {
     const amount: number = this.amount();
@@ -323,9 +323,11 @@ export struct RecordDetail {
     if (amount <= 0 || (this.isAutoMeasured() && !aiConfirmed &&
       (amount <= 0.05 || this.verificationStatus !== 'verified' ||
         (this.evidenceSource !== 'location' && this.evidenceSource !== 'health')))) {
+      this.showSaveHint(amount);
       return;
     }
     if (!this.factorService.supports(this.behavior.id, this.selectedUnit)) {
+      this.showSaveHint(amount);
       return;
     }
     const now: number = Date.now();
@@ -361,6 +363,21 @@ export struct RecordDetail {
       imageHash: this.imageHash,
       riskFlags: this.riskFlags
     });
+  }
+
+  /**
+   * 保存被拦截时的兜底提示
+   * 按钮对自动测量行为保持可点击，拦截时在此给出明确原因，避免点击后没有任何反馈
+   * @param amount 当前解析出的完成数量
+   */
+  private showSaveHint(amount: number): void {
+    let message: string = '请先完成系统测量或图片认证，再保存记录';
+    if (amount <= 0) {
+      message = '请先填写完成数量，或点击测量获取真实数据';
+    } else if (!this.factorService.supports(this.behavior.id, this.selectedUnit)) {
+      message = '当前行为暂无碳因子，无法保存';
+    }
+    this.getUIContext().getPromptAction().showToast({ message: message, duration: 1600 });
   }
 
   /**
@@ -411,7 +428,7 @@ export struct RecordDetail {
 
   /**
    * 读取华为运动步数
-   * 步数按固定口径（0.7 米/步）换算为公里；读取成功且步数大于 0 时核验通过，
+   * 步数按因子目录统一口径（0.7 米/步）换算为公里；读取成功且步数大于 0 时核验通过，
    * 否则降级为手动待核实
    */
   private async readHuaweiActivity(): Promise<void> {
@@ -419,8 +436,8 @@ export struct RecordDetail {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       const result = await this.evidenceService.readHuaweiActivity(context);
       if (result.source === 'health' && result.amount > 0) {
-        // 华为运动返回步数，按 0.7 米/步换算为距离；该换算口径固定保存，不由用户输入。
-        this.amountText = (result.amount * 0.0007).toFixed(3);
+        // 华为运动返回步数，统一按因子目录的步幅口径换算为距离；口径固定保存，不由用户输入。
+        this.amountText = (result.amount * STEP_TO_KM).toFixed(3);
         this.selectedUnit = '公里';
         this.verificationStatus = 'verified';
         this.evidenceSource = 'health';

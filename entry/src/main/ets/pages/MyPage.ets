@@ -7,7 +7,7 @@ import { common } from '@kit.AbilityKit';
 import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
-import { CarbonPointsService, PointsReward, PointsSnapshot } from '../services/CarbonPointsService';
+import { CarbonPointsService, DailyTaskDef, DAILY_TASKS, PointsReward, PointsSnapshot, POINTS_REWARDS } from '../services/CarbonPointsService';
 import { RecordDraft } from './RecordDetail';
 import { BackupPayload, BackupService } from '../services/BackupService';
 
@@ -19,7 +19,7 @@ interface DailyTask {
   title: string;
   /** 完成条件说明，展示在任务行副标题 */
   description: string;
-  /** 完成后可领取的积分，实际入账以服务层白名单分值为准 */
+  /** 完成后可领取的积分，取值与服务层白名单同源 */
   points: number;
 }
 
@@ -31,6 +31,18 @@ interface DailyTask {
  */
 function isGlassCapable(): boolean {
   return deviceInfo.sdkApiVersion >= 26 && uiMaterial.isImmersiveMaterialSupported();
+}
+
+/**
+ * 从积分服务的任务白名单查询分值
+ * 任务卡片展示的分值与服务层实际入账保持同源，避免两处维护后不一致
+ * @param taskId 任务 id
+ * @returns 白名单中的分值；未知任务返回 0（仅兜底，页面不展示白名单外任务）
+ */
+function taskPointsOf(taskId: string): number {
+  const taskDef: DailyTaskDef | undefined =
+    DAILY_TASKS.find((item: DailyTaskDef): boolean => item.id === taskId);
+  return taskDef !== undefined ? taskDef.points : 0;
 }
 
 /**
@@ -91,16 +103,12 @@ export struct MyPage {
   /** 本地备份服务：负责备份、恢复与 CSV 报表 */
   private backupService: BackupService = new BackupService();
 
-  /** 可兑换的模拟权益清单：仅用于演示，兑换结果只保存在本机 */
-  private readonly rewardItems: PointsReward[] = [
-    { id: 'green-badge', title: '校园绿能徽章', description: '虚拟徽章，兑换后展示在碳记权益记录中', cost: 30 },
-    { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
-    { id: 'travel-coupon', title: '低碳出行优惠券', description: '模拟权益码：GREEN-TRAVEL-2026', cost: 120 }
-  ];
-  /** 日常任务不允许页面自定义，分值由服务层再次白名单校验。 */
+  /** 可兑换的模拟权益清单：目录由积分服务统一定义，页面展示与服务层校验共用同一份；兑换结果只保存在本机 */
+  private readonly rewardItems: PointsReward[] = POINTS_REWARDS;
+  /** 日常任务清单：id 与分值由服务层白名单统一定义，页面只补充标题与说明文案。 */
   private readonly dailyTasks: DailyTask[] = [
-    { id: 'verified-travel', title: '完成一次核验出行', description: '步行、骑行或公共交通满 1 km', points: 5 },
-    { id: 'knowledge-favorite', title: '收藏一篇双碳科普', description: '在成长页收藏任意一篇文章', points: 3 }
+    { id: 'verified-travel', title: '完成一次核验出行', description: '步行、骑行或公共交通满 1 km', points: taskPointsOf('verified-travel') },
+    { id: 'knowledge-favorite', title: '收藏一篇双碳科普', description: '在成长页收藏任意一篇文章', points: taskPointsOf('knowledge-favorite') }
   ];
   /** 底部导航条的液态玻璃材质：薄样式 + 低不透明度淡绿赋色；不具备能力的设备为 undefined */
   private navBarMaterial: uiMaterial.Material | undefined = isGlassCapable()

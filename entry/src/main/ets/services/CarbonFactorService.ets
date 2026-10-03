@@ -20,6 +20,9 @@ export interface CarbonFactor {
 export const CARBON_FACTOR_CATALOG_SOURCE: string =
   '依据 GB/T 32150—2015、IPCC 2006 Guidelines 及生态环境主管部门公开电力因子；行为值为替代行为估算';
 
+/** 华为运动步数换算口径：0.7 米/步（成人平均步幅公开近似值），换算系数 0.7 ÷ 1000 = 0.0007 公里/步 */
+export const STEP_TO_KM: number = 0.0007;
+
 /** 碳因子目录：全部行为的减排系数与来源（公开近似口径，仅供记录参考） */
 const FACTORS: CarbonFactor[] = [
   { behaviorId: 'walk', unit: '公里', baseUnit: '公里', factor: 0.21, source: '公开近似口径，按替代燃油出行估算' },

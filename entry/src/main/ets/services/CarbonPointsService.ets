@@ -58,6 +58,27 @@ export interface PointsReward {
   cost: number;
 }
 
+/** 权益兑换唯一目录：页面展示与服务层价格校验共用同一份，避免两处维护后不一致 */
+export const POINTS_REWARDS: PointsReward[] = [
+  { id: 'green-badge', title: '校园绿能徽章', description: '虚拟徽章，兑换后展示在碳记权益记录中', cost: 30 },
+  { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
+  { id: 'travel-coupon', title: '低碳出行优惠券', description: '模拟权益码：GREEN-TRAVEL-2026', cost: 120 }
+];
+
+/** 日常任务定义：任务 id 与分值白名单条目 */
+export interface DailyTaskDef {
+  /** 任务唯一标识，领取时由服务层校验 */
+  id: string;
+  /** 任务完成后可领取的积分 */
+  points: number;
+}
+
+/** 日常任务白名单：页面展示分值与服务层校验共用同一份，避免两处维护后不一致 */
+export const DAILY_TASKS: DailyTaskDef[] = [
+  { id: 'verified-travel', points: 5 },
+  { id: 'knowledge-favorite', points: 3 }
+];
+
 /** 反序列化时的宽松类型：字段合法性由 normalize 统一兜底 */
 interface StoredPoints extends PointsSnapshot {
 }
@@ -176,15 +197,12 @@ export class CarbonPointsService {
 
   /**
    * 兑换目录在服务层再次校验，避免页面传入任意低价或负价权益破坏积分平衡。
-   * 比赛演示只开放这三种固定权益，后续接真实平台时可替换为服务端目录。
+   * 目录与页面展示共用 POINTS_REWARDS 单一数据源，后续接真实平台时可替换为服务端目录。
    */
   private isAllowedReward(reward: PointsReward): boolean {
-    switch (reward.id) {
-      case 'green-badge': return reward.cost === 30;
-      case 'tree-certificate': return reward.cost === 80;
-      case 'travel-coupon': return reward.cost === 120;
-      default: return false;
-    }
+    const catalog: PointsReward | undefined =
+      POINTS_REWARDS.find((item: PointsReward): boolean => item.id === reward.id);
+    return catalog !== undefined && catalog.cost === reward.cost;
   }
 
   /**
@@ -213,8 +231,9 @@ export class CarbonPointsService {
    * @returns 统一操作结果（任务无效或当日已完成时失败）
    */
   async claimTask(context: common.Context, taskId: string): Promise<PointsActionResult> {
-    const taskPoints: number | undefined = taskId === 'verified-travel' ? 5 :
-      taskId === 'knowledge-favorite' ? 3 : undefined;
+    const taskDef: DailyTaskDef | undefined =
+      DAILY_TASKS.find((item: DailyTaskDef): boolean => item.id === taskId);
+    const taskPoints: number | undefined = taskDef?.points;
     const snapshot: PointsSnapshot = await this.load(context);
     if (taskPoints === undefined) {
       return this.result(false, 0, snapshot.balance, '任务信息无效');
