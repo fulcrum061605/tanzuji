@@ -275,7 +275,29 @@ export struct MyPage {
   }
 
   /**
-   * 读取最近一次备份并恢复记录、积分与收藏
+   * 恢复前二次确认
+   * 恢复会用最近一次备份覆盖当前的记录、积分与收藏，为避免误触丢数据先弹窗确认
+   */
+  private confirmRestore(): void {
+    this.getUIContext().showAlertDialog({
+      title: '确认恢复备份',
+      message: '恢复将用最近一次备份覆盖当前的记录、积分与收藏，覆盖后无法撤销。确定继续吗？',
+      primaryButton: {
+        value: '取消',
+        action: (): void => {}
+      },
+      secondaryButton: {
+        value: '恢复',
+        fontColor: '#B4532A',
+        action: (): void => {
+          this.restoreRecords();
+        }
+      }
+    });
+  }
+
+  /**
+   * 读取最近一次备份并恢复记录、积分与收藏（由 confirmRestore 二次确认后调用）
    * 备份中有记录时先经回调交给入口页更新列表，再持久化积分与收藏
    */
   private async restoreRecords(): Promise<void> {
@@ -802,7 +824,7 @@ export struct MyPage {
           .onClick((): void => { this.backupRecords(); })
         Button('读取最近备份', { type: ButtonType.Capsule, stateEffect: true })
           .width('100%').height(42).backgroundColor('#E5F0E5').fontColor('#376D52')
-          .onClick((): void => { this.restoreRecords(); })
+          .onClick((): void => { this.confirmRestore(); })
         Button('生成 CSV 报表', { type: ButtonType.Capsule, stateEffect: true })
           .width('100%').height(42).backgroundColor('#E5F0E5').fontColor('#376D52')
           .onClick((): void => { this.exportCsvReport(); })
