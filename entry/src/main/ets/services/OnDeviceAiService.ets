@@ -5,6 +5,9 @@
  */
 import { textRecognition } from '@kit.CoreVisionKit';
 import image from '@ohos.multimedia.image';
+import { hilog } from '@kit.PerformanceAnalysisKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { fileIo } from '@kit.CoreFileKit';
 
 /** 端侧 OCR 识别产出的可确认草稿：识别文本、解析数量与本地风险评估结果 */
 export interface AiRecognitionDraft {
@@ -108,8 +111,9 @@ export class OnDeviceAiService {
 
   /**
    * 在本机调用 Core Vision Kit OCR 并生成可确认草稿
-   * 识别后本地计算图片指纹、解析距离、校验行为关键词与日期，汇总风险标记与置信度；
-   * OCR 失败或图片为空时返回带风险标记的降级结果，页面仍可保存为待核实记录。
+   * 完整链路：能力检查(canIUse) → 服务初始化(init) → fileIo 句柄解码为 RGBA_8888 像素图 →
+   * recognizeText 识别 → 本地解析距离、校验关键词与日期、计算图片指纹，汇总风险标记与置信度；
+   * 任一环节失败或图片为空时返回带风险标记的降级结果并记录错误码，页面仍可保存为待核实记录。
    * @param uri 系统相册授权的图片 URI
    * @param behaviorName 当前记录的行为名称（用于关键词匹配）
    * @returns 端侧识别草稿（含数量、置信度、风险标记与图片指纹）
@@ -124,9 +128,31 @@ export class OnDeviceAiService {
     }
     let source: image.ImageSource | undefined;
     let pixelMap: image.PixelMap | undefined;
+    let ocrReady: boolean = false;
+    let fileHandle: fileIo.File | undefined;
     try {
-      source = image.createImageSource(uri);
-      pixelMap = await source.createPixelMap();
+      // 前置能力检查：设备未随附 OCR 系统能力（部分机型/模拟器）时直接降级，不调用识别服务
+      if (!canIUse('SystemCapability.AI.OCR.TextRecognition')) {
+        return {
+          text: '', amount: 0, unit: '', recognizedBehavior: behaviorName, confidence: 0,
+          imageHash: this.fingerprint(uri), riskFlags: ['设备不支持端侧 OCR'], provider: 'CoreVisionKit.OCR'
+        };
+      }
+      // recognizeText 前必须先初始化 OCR 服务（API 12 起），未初始化直接抛 1001400002 服务异常
+      ocrReady = await textRecognition.init();
+      if (!ocrReady) {
+        return {
+          text: '', amount: 0, unit: '', recognizedBehavior: behaviorName, confidence: 0,
+          imageHash: this.fingerprint(uri), riskFlags: ['端侧 OCR 初始化失败，请重试'], provider: 'CoreVisionKit.OCR'
+        };
+      }
+      // 按官方 OCR 示例模式解码：先 fileIo.open 取文件句柄、再以 fd 创建 ImageSource；
+      // 部分真机上直接用 file://media URI 字符串创建 ImageSource 会解码失败
+      fileHandle = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
+      source = image.createImageSource(fileHandle.fd);
+      // VisionInfo 仅接受 RGBA_8888 像素格式，显式指定解码格式避免 HEIC 等源图解码出非法格式
+      const decodeOptions: image.DecodingOptions = { desiredPixelFormat: image.PixelMapFormat.RGBA_8888 };
+      pixelMap = await source.createPixelMap(decodeOptions);
       const result: textRecognition.TextRecognitionResult = await textRecognition.recognizeText({ pixelMap: pixelMap });
       const text: string = result.value ?? '';
       const imageHash: string = await this.imageFingerprint(uri, pixelMap);
@@ -157,16 +183,26 @@ export class OnDeviceAiService {
         provider: 'CoreVisionKit.OCR'
       };
     } catch (error) {
+      // 记录真实错误码便于真机定位：200 超时 / 401 参数（含像素格式非法）/ 1001400001 运行失败 / 1001400002 服务异常
+      const err: BusinessError = error as BusinessError;
+      hilog.error(0x0000, 'OnDeviceAi', `recognize failed: code=${err.code}, message=${err.message}`);
       return {
         text: '', amount: 0, unit: '', recognizedBehavior: behaviorName, confidence: 0,
         imageHash: this.fingerprint(uri), riskFlags: ['设备端 OCR 不可用'], provider: 'CoreVisionKit.OCR'
       };
     } finally {
+      // 逐层释放：像素图 → 图像源 → 文件句柄 → OCR 服务，避免句柄与服务泄漏
       if (pixelMap !== undefined) {
         await pixelMap.release();
       }
       if (source !== undefined) {
         await source.release();
+      }
+      if (fileHandle !== undefined) {
+        await fileIo.close(fileHandle);
+      }
+      if (ocrReady) {
+        await textRecognition.release();
       }
     }
   }

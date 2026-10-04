@@ -32,6 +32,16 @@ export interface PointsSnapshot {
   aiRecordDayPoints?: number;
   /** 已获得图片辅助认证积分的图片摘要。 */
   aiRewardedImageHashes?: string[];
+  /** 最近一次答题结算日期；每天只能结算一次答题积分。 */
+  quizDay?: string;
+  /** 最近一次答题获得的积分，供我的页面展示和兼容恢复使用。 */
+  quizDayPoints?: number;
+  /** 足迹棋盘当前位置，旧数据默认为起点。 */
+  footprintPosition?: number;
+  /** 已获得的棋盘模拟权益 id，避免机会格重复发放同一权益。 */
+  footprintBenefitIds?: string[];
+  /** 最近一次棋盘权益领取日期，按本地周限制。 */
+  footprintBenefitWeek?: string;
 }
 
 /** 签到/入账/兑换操作的统一结果 */
@@ -44,6 +54,14 @@ export interface PointsActionResult {
   balance: number;
   /** 面向用户的提示文案 */
   message: string;
+}
+
+/** 足迹棋盘掷骰结果：补充步数、落点和落点反馈。 */
+export interface FootprintRollResult extends PointsActionResult {
+  steps: number;
+  position: number;
+  rewardTitle: string;
+  benefitId: string;
 }
 
 /** 可兑换的模拟权益定义 */
@@ -95,7 +113,12 @@ const EMPTY_POINTS: PointsSnapshot = {
   recordDayPoints: 0,
   aiRecordDay: '',
   aiRecordDayPoints: 0,
-  aiRewardedImageHashes: []
+  aiRewardedImageHashes: [],
+  quizDay: '',
+  quizDayPoints: 0,
+  footprintPosition: 0,
+  footprintBenefitIds: [],
+  footprintBenefitWeek: ''
 };
 
 export class CarbonPointsService {
@@ -149,7 +172,13 @@ export class CarbonPointsService {
       aiRecordDay: typeof value.aiRecordDay === 'string' ? value.aiRecordDay : '',
       aiRecordDayPoints: Math.max(0, Number(value.aiRecordDayPoints) || 0),
       aiRewardedImageHashes: Array.isArray(value.aiRewardedImageHashes)
-        ? value.aiRewardedImageHashes.filter((item: string): boolean => item.length > 0) : []
+        ? value.aiRewardedImageHashes.filter((item: string): boolean => item.length > 0) : [],
+      quizDay: typeof value.quizDay === 'string' ? value.quizDay : '',
+      quizDayPoints: Math.max(0, Number(value.quizDayPoints) || 0),
+      footprintPosition: Math.max(0, Math.floor(Number(value.footprintPosition) || 0)) % 16,
+      footprintBenefitIds: Array.isArray(value.footprintBenefitIds)
+        ? value.footprintBenefitIds.filter((item: string): boolean => item.length > 0) : [],
+      footprintBenefitWeek: typeof value.footprintBenefitWeek === 'string' ? value.footprintBenefitWeek : ''
     };
   }
 
@@ -340,6 +369,97 @@ export class CarbonPointsService {
     snapshot.totalEarned += points;
     await this.save(context, snapshot);
     return this.result(true, points, snapshot.balance, `AI 辅助认证成功，获得 ${points} 积分`);
+  }
+
+  /**
+   * 每日答题积分：完成一套 10 题后只结算一次，最高 4 分。
+   * 答题主要承担知识激励，积分低于低碳行为核验积分，避免刷题替代真实行动。
+   * @param context 应用上下文
+   * @param correctCount 本套答对题数，范围按 0-10 夹取
+   */
+  async rewardQuiz(context: common.Context, correctCount: number): Promise<PointsActionResult> {
+    const snapshot: PointsSnapshot = await this.load(context);
+    const today: string = this.today();
+    if (snapshot.quizDay === today) {
+      return this.result(false, 0, snapshot.balance, '今天已经完成过答题');
+    }
+    const correct: number = Math.max(0, Math.min(10, Math.floor(Number(correctCount) || 0)));
+    let points: number = 1;
+    if (correct >= 6 && correct <= 7) {
+      points = 2;
+    } else if (correct >= 8 && correct <= 9) {
+      points = 3;
+    } else if (correct === 10) {
+      points = 4;
+    }
+    snapshot.quizDay = today;
+    snapshot.quizDayPoints = points;
+    snapshot.balance += points;
+    snapshot.totalEarned += points;
+    await this.save(context, snapshot);
+    return this.result(true, points, snapshot.balance, `答题完成，获得 ${points} 积分`);
+  }
+
+  /** 生成本地周键；棋盘模拟权益每周最多领取一次。 */
+  private footprintWeek(): string {
+    const date: Date = new Date();
+    const first: Date = new Date(date.getFullYear(), 0, 1);
+    const dayIndex: number = Math.floor((date.getTime() - first.getTime()) / 86400000);
+    return `${date.getFullYear()}-${Math.floor(dayIndex / 7).toString()}`;
+  }
+
+  /**
+   * 足迹棋盘掷骰：每次消耗 5 积分，随机前进 1-6 格并结算落点。
+   * 机会格每周只发放一次模拟权益；本周已领时改为展示科普内容。
+   */
+  async rollFootprint(context: common.Context): Promise<FootprintRollResult> {
+    const snapshot: PointsSnapshot = await this.load(context);
+    const cost: number = 5;
+    const currentPosition: number = snapshot.footprintPosition ?? 0;
+    if (snapshot.balance < cost) {
+      return {
+        success: false, points: 0, balance: snapshot.balance, message: '至少需要 5 积分才能前进',
+        steps: 0, position: currentPosition, rewardTitle: '', benefitId: ''
+      };
+    }
+    const steps: number = Math.floor(Math.random() * 6) + 1;
+    const position: number = (currentPosition + steps) % 16;
+    snapshot.footprintPosition = position;
+    snapshot.balance -= cost;
+    snapshot.totalRedeemed += cost;
+    let rewardPoints: number = 0;
+    let rewardTitle: string = '继续沿着低碳足迹前进';
+    let benefitId: string = '';
+    if ([1, 2, 4, 5, 7, 9, 11, 12, 14].includes(position)) {
+      rewardPoints = position === 4 ? 3 : 2;
+      rewardTitle = `低碳行动格：返还 ${rewardPoints} 积分`;
+    } else if ([3, 6, 10, 13].includes(position)) {
+      const week: string = this.footprintWeek();
+      if (snapshot.footprintBenefitWeek !== week) {
+        const benefits: string[] = ['campus-green-badge', 'tree-memory-card', 'green-travel-pass'];
+        benefitId = benefits[Math.floor(Math.random() * benefits.length)];
+        snapshot.footprintBenefitWeek = week;
+        snapshot.footprintBenefitIds = [...(snapshot.footprintBenefitIds ?? []), benefitId];
+        rewardTitle = benefitId === 'campus-green-badge' ? '机会格：获得校园绿能徽章（模拟权益）'
+          : benefitId === 'tree-memory-card' ? '机会格：获得虚拟植树纪念卡（模拟权益）'
+          : '机会格：获得低碳出行体验券（模拟权益）';
+      } else {
+        rewardTitle = '本周权益已领取，获得一条低碳知识';
+      }
+    } else if (position === 8) {
+      rewardPoints = 4;
+      rewardTitle = '绿色补给站：返还 4 积分';
+    } else if (position === 19) {
+      rewardPoints = 5;
+      rewardTitle = '终点：完成一圈，返还 5 积分';
+    }
+    snapshot.balance += rewardPoints;
+    snapshot.totalEarned += rewardPoints;
+    await this.save(context, snapshot);
+    return {
+      success: true, points: rewardPoints - cost, balance: snapshot.balance, message: rewardTitle,
+      steps: steps, position: position, rewardTitle: rewardTitle, benefitId: benefitId
+    };
   }
 
 

@@ -19,6 +19,8 @@ import { PreviewAuthService } from '../services/PreviewAuthService';
 import { MyPage } from './MyPage';
 import { FootprintPage } from './FootprintPage';
 import { KnowledgeCenter } from './KnowledgeCenter';
+import { QuizPage } from './QuizPage';
+import { FootprintGamePage } from './FootprintGamePage';
 import { CarbonPointsService } from '../services/CarbonPointsService';
 import { DiaryStorageService } from '../services/DiaryStorageService';
 
@@ -54,6 +56,10 @@ struct Index {
   @State private editingSavedIndex: number = -1;
   /** 当前底部栏目；“我的”由独立页面承载，其余栏目仍在 Home 中显示。 */
   @State private activeTab: string = '日记';
+  /** 是否正在进行低碳知识答题。 */
+  @State private takingQuiz: boolean = false;
+  /** 是否正在进行低碳足迹棋盘。 */
+  @State private takingFootprintGame: boolean = false;
   /** 首页当前筛选的自然日，默认今天。 */
   @State private selectedDate: number = Date.now();
   /** 已从首页删除的示例记录，避免静态样例再次出现。 */
@@ -222,7 +228,21 @@ struct Index {
   build() {
     // 已登录：渲染日记首页（当前暂无退出登录入口）
     if (this.loggedIn) {
-      if (this.activeTab === '成长' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
+      if (this.takingFootprintGame) {
+        FootprintGamePage({
+          onBack: () => {
+            this.takingFootprintGame = false;
+            this.activeTab = '我的';
+          }
+        })
+      } else if (this.takingQuiz) {
+        QuizPage({
+          onBack: () => {
+            this.takingQuiz = false;
+            this.activeTab = '我的';
+          }
+        })
+      } else if (this.activeTab === '成长' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
         KnowledgeCenter({
           selectedTab: this.activeTab,
           savedDrafts: this.savedDrafts,
@@ -249,6 +269,14 @@ struct Index {
           onStartImageCertification: () => {
             this.activeTab = '日记';
             this.pickingBehavior = true;
+          },
+          onStartQuiz: () => {
+            this.activeTab = '我的';
+            this.takingQuiz = true;
+          },
+          onStartFootprintGame: () => {
+            this.activeTab = '我的';
+            this.takingFootprintGame = true;
           },
           onNavigate: (tab: string) => {
             if (tab === '我的') {

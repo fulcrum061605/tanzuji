@@ -65,7 +65,8 @@ export class BackupService {
       return { version: 0, exportedAt: 0, records: [], points: {
         balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
         redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
-        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
+        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: [], quizDay: '', quizDayPoints: 0,
+        footprintPosition: 0, footprintBenefitIds: [], footprintBenefitWeek: ''
       }, favoriteIds: [] };
     }
     try {
@@ -74,14 +75,16 @@ export class BackupService {
         version: 0, exportedAt: 0, records: [], points: {
           balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
           redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
-          aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
+          aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: [], quizDay: '', quizDayPoints: 0,
+          footprintPosition: 0, footprintBenefitIds: [], footprintBenefitWeek: ''
         }, favoriteIds: []
       };
     } catch (error) {
       return { version: 0, exportedAt: 0, records: [], points: {
         balance: 0, totalEarned: 0, totalRedeemed: 0, claimedTaskKeys: [], rewardedOperationIds: [],
         redeemedRewardIds: [], recordDay: '', recordDayPoints: 0,
-        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: []
+        aiRecordDay: '', aiRecordDayPoints: 0, aiRewardedImageHashes: [], quizDay: '', quizDayPoints: 0,
+        footprintPosition: 0, footprintBenefitIds: [], footprintBenefitWeek: ''
       }, favoriteIds: [] };
     }
   }

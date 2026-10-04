@@ -62,6 +62,10 @@ export struct MyPage {
   onRestoreRecords?: (records: RecordDraft[]) => void;
   /** 从积分认证入口进入行为选择页，之后复用记录详情的图片认证流程。 */
   onStartImageCertification?: () => void;
+  /** 打开离线低碳答题页。 */
+  onStartQuiz?: () => void;
+  /** 打开离线低碳足迹棋盘。 */
+  onStartFootprintGame?: () => void;
   /** 全部文章列表：用于渲染收藏项与详情 */
   @State private articles: KnowledgeArticle[] = [];
   /** 已收藏的文章 id 列表 */
@@ -1253,6 +1257,14 @@ export struct MyPage {
             // 菜单入口：我的收藏（显示收藏数量）
             this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.diary_leaf'), () => {
               this.showingFavorites = true;
+            })
+            // 菜单入口：低碳答题（每日最多获得 4 分，作为知识激励）
+            this.MenuRow('低碳答题', '完成每日知识挑战，最高获得 4 积分', $r('app.media.diary_sprout'), () => {
+              this.onStartQuiz?.();
+            })
+            // 菜单入口：低碳足迹棋盘（每次消耗 5 积分，权益每周限领一次）
+            this.MenuRow('低碳足迹', '消耗 5 积分随机前进，发现低碳知识与模拟权益', $r('app.media.diary_leaf'), () => {
+              this.onStartFootprintGame?.();
             })
             // 菜单入口：积分与权益（模拟兑换，不连接真实平台）
             this.MenuRow('积分与权益', '签到、查看积分并兑换模拟低碳权益', $r('app.media.diary_leaf'), () => {
