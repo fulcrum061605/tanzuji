@@ -6,6 +6,8 @@ import { uiMaterial } from '@kit.ArkUI';
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { common } from '@kit.AbilityKit';
 import { systemShare } from '@kit.ShareKit';
+import { image } from '@kit.ImageKit';
+import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { BehaviorOption } from './BehaviorPicker';
 import { RecordDraft } from './RecordDetail';
 import { CARBON_FACTOR_CATALOG_SOURCE, amountWithUnit } from '../services/CarbonFactorService';
@@ -125,7 +127,7 @@ export struct DiaryDetail {
    */
   private verificationLabel(): string {
     if (this.draft.verificationKind === 'ai_assisted') {
-      return this.draft.aiStatus === 'rejected' ? '图片认证未通过' : 'AI 辅助核验，不计正式减排';
+      return this.draft.aiStatus === 'rejected' ? '图片认证未通过' : 'AI 辅助核验，按半额积分';
     }
     if (this.draft.verificationStatus === 'verified') {
       return this.draft.evidenceSource === 'health' ? '华为运动已核验' : '系统轨迹已核验';
@@ -152,10 +154,41 @@ export struct DiaryDetail {
     return '数量来源：手动填写';
   }
 
-  /** 通过 HarmonyOS 系统分享面板分享当前日记文字。 */
-  private async share(): Promise<void> {
+  /** 将日记正文区域截图为 JPEG，返回可被系统分享面板读取的应用文件 URI。 */
+  private async createShareImage(context: common.UIAbilityContext): Promise<string> {
+    const pixelMap = await this.getUIContext().getComponentSnapshot().get('diary-share-root');
+    const imagePath: string = `${context.cacheDir}/tanji-diary-${Date.now()}.jpg`;
+    const file = await fileIo.open(imagePath, fileIo.OpenMode.WRITE_ONLY |
+      fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
     try {
-      const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+      const packer: image.ImagePacker = image.createImagePacker();
+      await packer.packToFile(pixelMap, file.fd, { format: 'image/jpeg', quality: 95 });
+      await packer.release();
+    } finally {
+      await fileIo.close(file);
+    }
+    return fileUri.getUriFromPath(imagePath);
+  }
+
+  /** 通过 HarmonyOS 系统分享面板分享当前日记图片；失败时回退为文字分享。 */
+  private async share(): Promise<void> {
+    const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
+    try {
+      const imageUri: string = await this.createShareImage(context);
+      const data: systemShare.SharedData = new systemShare.SharedData({
+        utd: 'general.image',
+        uri: imageUri,
+        title: '碳记日记',
+        label: 'IMAGE',
+        description: '来自碳记的低碳日记'
+      });
+      const controller: systemShare.ShareController = new systemShare.ShareController(data);
+      await controller.show(context, {});
+      return;
+    } catch (imageError) {
+      // 图片截图或编码失败时继续使用文字分享，保证分享按钮仍可用。
+    }
+    try {
       const data: systemShare.SharedData = new systemShare.SharedData({
         utd: 'general.text',
         content: `${this.monthWeek()} ${this.time()}\n${this.content()}\n减排量：${this.draft.reductionKg.toFixed(3)} kg CO₂e`,
@@ -404,6 +437,7 @@ export struct DiaryDetail {
       .width('100%')
       .height('100%')
       .justifyContent(FlexAlign.Start)
+      .id('diary-share-root')
 
       // 上层：悬浮编辑按钮容器
       Column() {

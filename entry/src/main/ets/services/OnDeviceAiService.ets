@@ -3,8 +3,11 @@
  * 仅封装华为 Core Vision Kit OCR 和本地规则，不联网、不上传图片。
  * OCR 失败时返回可解释的降级结果，页面仍可继续保存为待核实记录。
  */
+import { common } from '@kit.AbilityKit';
 import { textRecognition } from '@kit.CoreVisionKit';
 import image from '@ohos.multimedia.image';
+import { photoAccessHelper } from '@kit.MediaLibraryKit';
+import dataSharePredicates from '@ohos.data.dataSharePredicates';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { fileIo } from '@kit.CoreFileKit';
@@ -114,11 +117,12 @@ export class OnDeviceAiService {
    * 完整链路：能力检查(canIUse) → 服务初始化(init) → fileIo 句柄解码为 RGBA_8888 像素图 →
    * recognizeText 识别 → 本地解析距离、校验关键词与日期、计算图片指纹，汇总风险标记与置信度；
    * 任一环节失败或图片为空时返回带风险标记的降级结果并记录错误码，页面仍可保存为待核实记录。
+   * @param context 当前 Ability 上下文，用于通过 PhotoAccessHelper 读取临时授权图片
    * @param uri 系统相册授权的图片 URI
    * @param behaviorName 当前记录的行为名称（用于关键词匹配）
    * @returns 端侧识别草稿（含数量、置信度、风险标记与图片指纹）
    */
-  async recognize(uri: string, behaviorName: string): Promise<AiRecognitionDraft> {
+  async recognize(context: common.Context, uri: string, behaviorName: string): Promise<AiRecognitionDraft> {
     const riskFlags: string[] = [];
     if (uri.length === 0) {
       return {
@@ -130,31 +134,70 @@ export class OnDeviceAiService {
     let pixelMap: image.PixelMap | undefined;
     let ocrReady: boolean = false;
     let fileHandle: fileIo.File | undefined;
+    let photoAsset: photoAccessHelper.PhotoAsset | undefined;
+    let fetchResult: photoAccessHelper.FetchResult<photoAccessHelper.PhotoAsset> | undefined;
+    let photoAssetFd: number = -1;
     try {
-      // 前置能力检查：设备未随附 OCR 系统能力（部分机型/模拟器）时直接降级，不调用识别服务
-      if (!canIUse('SystemCapability.AI.OCR.TextRecognition')) {
-        return {
-          text: '', amount: 0, unit: '', recognizedBehavior: behaviorName, confidence: 0,
-          imageHash: this.fingerprint(uri), riskFlags: ['设备不支持端侧 OCR'], provider: 'CoreVisionKit.OCR'
-        };
+      // 部分鸿蒙版本的 canIUse 能力字符串与实际 Core Vision Kit 版本不完全一致。
+      // 只记录探测结果，不在这里提前退出；让官方 init/recognize 自己完成最终能力判断，
+      // 否则会把“能力探测误报”直接变成“设备端 OCR 不可用”。
+      const capabilityAvailable: boolean = canIUse('SystemCapability.AI.OCR.TextRecognition');
+      if (!capabilityAvailable) {
+        hilog.warn(0x0000, 'OnDeviceAi', 'OCR capability probe returned false; attempting compatible API path');
       }
-      // recognizeText 前必须先初始化 OCR 服务（API 12 起），未初始化直接抛 1001400002 服务异常
-      ocrReady = await textRecognition.init();
-      if (!ocrReady) {
-        return {
-          text: '', amount: 0, unit: '', recognizedBehavior: behaviorName, confidence: 0,
-          imageHash: this.fingerprint(uri), riskFlags: ['端侧 OCR 初始化失败，请重试'], provider: 'CoreVisionKit.OCR'
-        };
+      // API 12+ 可以显式初始化 OCR；API 10/11 或部分系统镜像会返回 false，
+      // 但 recognizeText 仍可直接调用，因此不能把 init=false 当成最终失败。
+      try {
+        ocrReady = await textRecognition.init();
+      } catch (initError) {
+        hilog.warn(0x0000, 'OnDeviceAi', 'OCR init unavailable; trying direct recognizeText path');
+        ocrReady = false;
       }
-      // 按官方 OCR 示例模式解码：先 fileIo.open 取文件句柄、再以 fd 创建 ImageSource；
-      // 部分真机上直接用 file://media URI 字符串创建 ImageSource 会解码失败
-      fileHandle = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
-      source = image.createImageSource(fileHandle.fd);
-      // VisionInfo 仅接受 RGBA_8888 像素格式，显式指定解码格式避免 HEIC 等源图解码出非法格式
-      const decodeOptions: image.DecodingOptions = { desiredPixelFormat: image.PixelMapFormat.RGBA_8888 };
-      pixelMap = await source.createPixelMap(decodeOptions);
+      // PhotoViewPicker 返回的 URI 必须先通过 getAssets 换成 PhotoAsset。
+      // 这是鸿蒙相册的授权链路；直接把 photoUri 传给 fileIo.open 在部分真机上会失败。
+      try {
+        const helper: photoAccessHelper.PhotoAccessHelper = photoAccessHelper.getPhotoAccessHelper(context);
+        const predicates: dataSharePredicates.DataSharePredicates = new dataSharePredicates.DataSharePredicates();
+        predicates.equalTo(photoAccessHelper.PhotoKeys.URI, uri);
+        fetchResult = await helper.getAssets({ fetchColumns: [], predicates: predicates });
+        if (fetchResult.getCount() <= 0) {
+          throw new Error('selected photo asset not found');
+        }
+        photoAsset = await fetchResult.getFirstObject();
+        // API 11+ 推荐用 fileIo.open(PhotoAsset.uri)。保留 getReadOnlyFd 作为旧系统兼容路径。
+        try {
+          fileHandle = await fileIo.open(photoAsset.uri, fileIo.OpenMode.READ_ONLY);
+          source = image.createImageSource(fileHandle.fd);
+        } catch (assetOpenError) {
+          photoAssetFd = await photoAsset.getReadOnlyFd();
+          source = image.createImageSource(photoAssetFd);
+        }
+      } catch (assetError) {
+        // 兼容旧系统或非媒体 URI：再尝试直接 URI，最后才尝试文件描述符。
+        try {
+          source = image.createImageSource(uri);
+        } catch (directSourceError) {
+          fileHandle = await fileIo.open(uri, fileIo.OpenMode.READ_ONLY);
+          source = image.createImageSource(fileHandle.fd);
+        }
+      }
+      // 优先使用 OCR 所需的 RGBA_8888；部分图片解码器不接受显式格式时再使用默认格式。
+      try {
+        const decodeOptions: image.DecodingOptions = { desiredPixelFormat: image.PixelMapFormat.RGBA_8888 };
+        pixelMap = await source.createPixelMap(decodeOptions);
+      } catch (decodeError) {
+        pixelMap = await source.createPixelMap();
+      }
       const result: textRecognition.TextRecognitionResult = await textRecognition.recognizeText({ pixelMap: pixelMap });
-      const text: string = result.value ?? '';
+      // 不同系统版本对 result.value 的填充策略不同；部分版本只填充 blocks。
+      let text: string = result.value ?? '';
+      if (text.length === 0 && result.blocks !== undefined) {
+        const blockValues: string[] = [];
+        for (let blockIndex = 0; blockIndex < result.blocks.length; blockIndex++) {
+          blockValues.push(result.blocks[blockIndex].value);
+        }
+        text = blockValues.join('\n');
+      }
       const imageHash: string = await this.imageFingerprint(uri, pixelMap);
       const parsed: ParsedAmount = this.parseAmount(text);
       if (text.length < 6) {
@@ -200,6 +243,12 @@ export class OnDeviceAiService {
       }
       if (fileHandle !== undefined) {
         await fileIo.close(fileHandle);
+      }
+      if (photoAsset !== undefined && photoAssetFd >= 0) {
+        await photoAsset.close(photoAssetFd);
+      }
+      if (fetchResult !== undefined) {
+        fetchResult.close();
       }
       if (ocrReady) {
         await textRecognition.release();

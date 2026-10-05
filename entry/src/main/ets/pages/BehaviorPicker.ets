@@ -65,10 +65,12 @@ export struct BehaviorPicker {
   /** 当前已选行为的 id：空字符串表示尚未选择任何行为 */
   @State private selectedId: string = '';
   /** 宽屏布局标记：仅平板/横向大窗口使用紧凑顶部操作栏，手机保持原布局。 */
+  // 备注：该标记目前仅保存媒体查询的匹配结果，尚未被布局代码引用，预留用于宽屏适配
   @State private wideLayout: boolean = false;
 
   /** 组件即将出现：通过媒体查询判断是否处于宽屏（≥600vp）布局 */
   aboutToAppear(): void {
+    // matchMediaSync 同步创建媒体查询条件，并通过 matches 立即取得当前匹配结果
     this.wideLayout = this.getUIContext().getMediaQuery()
       .matchMediaSync('(width >= 600vp)').matches;
   }
@@ -89,6 +91,7 @@ export struct BehaviorPicker {
     }
     // 按名称包含关键字过滤
     return BEHAVIOR_OPTIONS.filter((item: BehaviorOption) => {
+      // 可检索文本为“名称 + id”拼接，因此中文名称与英文标识符均可命中
       const searchable: string = `${item.name}${item.id}`.toLowerCase();
       return searchable.includes(keyword);
     });
@@ -97,6 +100,7 @@ export struct BehaviorPicker {
   /**
    * 选中指定行为
    * @param id 行为唯一标识
+   * @returns 无返回值；对 @State selectedId 赋值后会自动触发相关卡片选中态的刷新
    */
   private selectBehavior(id: string): void {
     this.selectedId = id;
@@ -119,6 +123,7 @@ export struct BehaviorPicker {
   /**
    * 进入下一步
    * 未选择行为时直接返回；已选择时依据 id 查找完整选项并交给 onNext 回调
+   * @returns 无返回值；未选择行为或找不到对应选项时不触发 onNext 回调
    */
   private goNext(): void {
     // 未选择行为时不允许进入下一步（按钮本身已禁用，此处为双保险）
@@ -202,6 +207,7 @@ export struct BehaviorPicker {
       .accessibilityText(this.selectedId.length > 0 ? '下一步' : '请先选择低碳行为')
       .onClick(() => this.goNext())
     }
+    // 顶部操作栏容器：通栏定高，左右留出对称内边距
     .width('100%')
     .height(74)
     .padding({ left: 18, right: 18 })
@@ -299,6 +305,7 @@ export struct BehaviorPicker {
       // 到达边缘后可回弹（弹簧效果）
       .edgeEffect(EdgeEffect.Spring)
     }
+    // 页面根容器属性：全屏铺满，纸张米白底色
     .width('100%')
     .height('100%')
     .backgroundColor('#F7F8F2')

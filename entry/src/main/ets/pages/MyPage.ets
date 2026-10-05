@@ -2,13 +2,25 @@
  * 我的页面。
  * 个人概览与知识文章收藏共用 KnowledgeService 的 Preferences 数据，
  * 因此在成长页收藏的文章会立即出现在“我的收藏”中，并支持离线打开。
+ * 页面内部按状态标志切换五种视图：个人主页 / 我的收藏列表 / 文章详情 / 积分与权益中心 / 数据管理。
+ * 积分（签到、任务、核验入账、权益兑换）经 CarbonPointsService 持久化到 Preferences；备份、恢复与 CSV 报表经 BackupService 完成。
+ * 华为运动步数只统计 evidenceSource=health 且核验通过的记录，按统一步幅折算，不可手动刷写。
  */
+// common.Context：各服务读写 Preferences 所需的应用上下文
 import { common } from '@kit.AbilityKit';
+// uiMaterial：底部导航条液态玻璃（ImmersiveMaterial）材质能力
 import { uiMaterial } from '@kit.ArkUI';
+// deviceInfo：读取 sdkApiVersion，用于液态玻璃能力的系统版本降级判断
 import { deviceInfo } from '@kit.BasicServicesKit';
+// 知识服务与文章模型：收藏数据与成长页共用同一 Preferences 存储
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
+// 碳积分服务：日常任务白名单、模拟权益目录与积分快照的唯一数据源
 import { CarbonPointsService, DailyTaskDef, DAILY_TASKS, PointsReward, PointsSnapshot, POINTS_REWARDS } from '../services/CarbonPointsService';
+// 记录草稿模型：步数统计、备份恢复与 CSV 报表共用的记录结构
 import { RecordDraft } from './RecordDetail';
+// 统一步幅常量（公里/步）：步数折算与碳因子目录保持同源
+import { STEP_TO_KM } from '../services/CarbonFactorService';
+// 备份服务：备份、恢复与 CSV 报表的本地持久化
 import { BackupPayload, BackupService } from '../services/BackupService';
 
 /** 积分页展示的日常任务定义；资格条件由页面结合真实本地数据判断。 */
@@ -48,6 +60,8 @@ function taskPointsOf(taskId: string): number {
 /**
  * 我的页组件
  * 三种视图：文章详情（打开收藏文章时） / 我的收藏列表 / 个人主页（概览 + 菜单入口 + 底部导航）。
+ * 另含两个子页视图：积分与权益中心（showingRewards）与数据管理（showingDataManagement）。
+ * 全部视图切换由 @State 标志在 build() 中分支渲染完成，不经过页面路由。
  * 收藏数据与成长页共用同一 Preferences 存储，跨页即时同步。
  */
 @Component
@@ -56,12 +70,19 @@ export struct MyPage {
   @Prop selectedTab: string = '我的';
   /** 切换底部栏目回调：参数为目标栏目名，由入口页完成页面切换 */
   onNavigate?: (tab: string) => void;
+  // 此外 healthSteps() 与日常任务资格判断也依赖此列表：只认可其中核验通过的真实记录。
   /** 从入口页传入的全部已保存记录：备份、恢复与 CSV 报表使用 */
   @Prop savedDrafts: RecordDraft[] = [];
   /** 恢复备份后回传记录列表，由入口页更新数据并落盘 */
   onRestoreRecords?: (records: RecordDraft[]) => void;
   /** 从积分认证入口进入行为选择页，之后复用记录详情的图片认证流程。 */
   onStartImageCertification?: () => void;
+  /** 首次绑定华为运动：复用记录页的官方运动授权流程。 */
+  onStartHealthBinding?: () => void;
+  /** 当前会话是否已完成华为运动授权。 */
+  @Prop healthBound: boolean = false;
+  /** 绑定页读取到的今日步数。 */
+  @Prop healthStepsToday: number = 0;
   /** 打开离线低碳答题页。 */
   onStartQuiz?: () => void;
   /** 打开离线低碳足迹棋盘。 */
@@ -84,14 +105,17 @@ export struct MyPage {
   @State private loading: boolean = true;
   /** 当前按下的底部栏目，用于与主页保持一致的轻微按压反馈。 */
   @State private pressedTab: string = '';
+  // 与 CarbonPointsService 快照的 balance 同源：签到、任务、核验入账增加，兑换权益消耗。
   /** 当前可用碳积分余额 */
   @State private points: number = 0;
   /** 当前登录用户昵称，来自本地登录会话。 */
   @State private displayName: string = '碳记用户';
   /** 累计获得积分（含已兑换消耗的部分） */
   @State private totalEarnedPoints: number = 0;
+  // 签到键格式为 check-in-yyyy-MM-dd，与服务层入账键一致，跨天自然失效。
   /** 今日是否已签到：由积分快照中的签到任务键推算 */
   @State private claimedCheckIn: boolean = false;
+  // 任务键格式为 task-{任务id}-yyyy-MM-dd，用于任务按钮的“已完成”置灰判断。
   /** 今日已领取的任务键，用于展示任务完成状态。 */
   @State private claimedTaskKeys: string[] = [];
   /** 已兑换（已领取）的模拟权益 id 列表 */
@@ -122,6 +146,8 @@ export struct MyPage {
     })
     : undefined;
 
+  // 生命周期回调：组件实例创建后、build() 首次执行前触发。
+  // 负责初始化三类数据：登录昵称（AppStorage）、文章收藏与积分快照。
   /** 组件即将出现：加载文章与收藏列表 */
   aboutToAppear(): void {
     const savedName: string | undefined = AppStorage.get<string>('loginDisplayName');
@@ -154,6 +180,22 @@ export struct MyPage {
   private todayKey(): string {
     const date: Date = new Date();
     return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+  }
+
+  /** 已绑定华为运动且读到今日步数时返回今日步数；否则将已核验公里数按统一步幅折算为累计步数。 */
+  private healthSteps(): number {
+    if (this.healthBound && this.healthStepsToday > 0) {
+      return this.healthStepsToday;
+    }
+    const kilometers: number = this.savedDrafts
+      .filter((draft: RecordDraft): boolean => draft.evidenceSource === 'health' && draft.verificationStatus === 'verified')
+      .reduce((sum: number, draft: RecordDraft): number => sum + Math.max(0, draft.amount), 0);
+    return Math.round(kilometers / STEP_TO_KM);
+  }
+
+  /** 步数卡片副标题：绑定当日为今日步数，其余场景为累计步数。 */
+  private healthStepsLabel(): string {
+    return this.healthBound && this.healthStepsToday > 0 ? '今日步数' : '累计步数';
   }
 
   /**
@@ -401,7 +443,7 @@ export struct MyPage {
         if (this.pressedTab === tab) {
           this.pressedTab = '';
         }
-      }, 120);
+      }, 180);
       return;
     }
     if (this.onNavigate) {
@@ -411,7 +453,7 @@ export struct MyPage {
           this.pressedTab = '';
         }
         this.onNavigate?.(tab);
-      }, 120);
+      }, 180);
     }
   }
 
@@ -425,10 +467,6 @@ export struct MyPage {
         .fontSize(27)
         .fontWeight(FontWeight.Bold)
         .fontColor('#123F2E')
-      Blank()
-      Text('碳记')
-        .fontSize(14)
-        .fontColor('#718078')
     }
     .width('100%')
     .height(52)
@@ -471,39 +509,59 @@ export struct MyPage {
   }
 
   /**
-   * 概览卡片：收藏文章数 + 离线可读两项统计
+   * 概览卡片：华为运动步数（绑定当日为今日步数，其余为累计已核验步数）+ 可用碳积分
    */
   @Builder
   private Overview() {
-    Row() {
-      // 收藏文章数
-      Column({ space: 5 }) {
-        Text(`${this.favoriteIds.length}`)
-          .fontSize(24)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#246244')
-        Text('收藏文章')
-          .fontSize(13)
-          .fontColor('#718078')
+    Column() {
+      Row() {
+        Column({ space: 4 }) {
+          if (this.healthSteps() > 0) {
+            Text(`${this.healthSteps()}`)
+              .fontSize(27)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#246244')
+            Text(this.healthStepsLabel())
+              .fontSize(13)
+              .fontColor('#718078')
+          } else {
+            Text('绑定华为运动')
+              .fontSize(17)
+              .fontWeight(FontWeight.Medium)
+              .fontColor('#246244')
+            Text('点击绑定华为运动')
+              .fontSize(13)
+              .fontColor('#718078')
+              .maxLines(1)
+          }
+        }
+        .alignItems(HorizontalAlign.Center)
+        .layoutWeight(1)
+        .onClick((): void => this.onStartHealthBinding?.())
+        Row()
+          .width(1)
+          .height(52)
+          .backgroundColor('#C9DEC9')
+        Column({ space: 4 }) {
+          Text(`${this.points}`)
+            .fontSize(27)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#246244')
+          Text('可用碳积分')
+            .fontSize(13)
+            .fontColor('#718078')
+        }
+        .alignItems(HorizontalAlign.Center)
+        .layoutWeight(1)
       }
-      .layoutWeight(1)
-      // 离线可读说明
-      Column({ space: 5 }) {
-        Text('离线可读')
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#246244')
-        Text('已缓存的科普文章')
-          .fontSize(13)
-          .fontColor('#718078')
-      }
-      .layoutWeight(1)
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
     }
     .width('100%')
-    .padding({ top: 18, bottom: 18 })
+    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
     .backgroundColor('#EAF3E7')
     .borderRadius(16)
-    .margin({ left: 22, right: 22, bottom: 24 })
+    .margin({ left: 22, right: 22, bottom: 18 })
   }
 
   /** 积分入口卡片：余额醒目，但明确展示积分来源和每日上限。 */
@@ -536,7 +594,7 @@ export struct MyPage {
           .syncLoad(true)
           .width(18)
           .height(18)
-        Text('系统核验：单条 2–20 分，每日上限 30 分；图片辅助认证：每日上限 10 分')
+          Text('系统核验：单条 2–20 分，每日上限 30 分；图片辅助认证按系统积分一半计入')
           .fontSize(12)
           .fontColor('#718078')
           .maxLines(2)
@@ -1252,8 +1310,6 @@ export struct MyPage {
             this.Header()
             this.Profile()
             this.Overview()
-            // 积分入口保持在个人概览之后，方便查看余额；完整签到和兑换流程在子页面中展开。
-            this.PointsCard()
             // 菜单入口：我的收藏（显示收藏数量）
             this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.diary_leaf'), () => {
               this.showingFavorites = true;
@@ -1284,6 +1340,7 @@ export struct MyPage {
         .scrollBar(BarState.Off)
         this.BottomNav()
       }
+      .backgroundColor('#F7F8F2')
       // 将底部液态玻璃导航的绘制范围延伸到系统手势区
       .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.BOTTOM])
     }

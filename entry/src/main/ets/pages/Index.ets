@@ -21,6 +21,7 @@ import { FootprintPage } from './FootprintPage';
 import { KnowledgeCenter } from './KnowledgeCenter';
 import { QuizPage } from './QuizPage';
 import { FootprintGamePage } from './FootprintGamePage';
+import { HealthBindingPage } from './HealthBindingPage';
 import { CarbonPointsService } from '../services/CarbonPointsService';
 import { DiaryStorageService } from '../services/DiaryStorageService';
 
@@ -60,6 +61,11 @@ struct Index {
   @State private takingQuiz: boolean = false;
   /** 是否正在进行低碳足迹棋盘。 */
   @State private takingFootprintGame: boolean = false;
+  /** 是否正在进行华为运动绑定；绑定页不创建低碳记录。 */
+  @State private bindingHealth: boolean = false;
+  /** 本次会话是否已经完成华为运动授权，以及读取到的今日步数。 */
+  @State private healthBound: boolean = false;
+  @State private healthStepsToday: number = 0;
   /** 首页当前筛选的自然日，默认今天。 */
   @State private selectedDate: number = Date.now();
   /** 已从首页删除的示例记录，避免静态样例再次出现。 */
@@ -92,6 +98,14 @@ struct Index {
     }
   }
 
+  /** 统一底部栏目切换：同步赋值、不加过渡动画，避免切页过程暴露子页加载态图标。 */
+  private switchTab(tab: string): void {
+    if (tab === this.activeTab) {
+      return;
+    }
+    this.activeTab = tab;
+  }
+
   /**
    * 从本地 Preferences 恢复已保存的日记记录
    * 读取失败时回退为空列表，页面以全新状态启动
@@ -99,7 +113,25 @@ struct Index {
   private async loadSavedDrafts(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
-      this.savedDrafts = await this.diaryStorage.load(context);
+      const loaded: RecordDraft[] = await this.diaryStorage.load(context);
+      // 兼容早期 AI 认证记录：旧版本已完成识别确认但仍写入 pending，启动时补齐为已核验，
+      // 不重新发放积分，避免重复计分；积分服务本身仍负责图片指纹去重。
+      this.savedDrafts = loaded.map((draft: RecordDraft): RecordDraft => {
+        const aiConfirmed: boolean = draft.verificationKind === 'ai_assisted' &&
+          draft.aiStatus !== 'rejected' && (draft.riskFlags ?? []).length === 0 && draft.amount > 0;
+        if (!aiConfirmed || draft.verificationStatus === 'verified') {
+          return draft;
+        }
+        draft.verificationStatus = 'verified';
+        draft.scoreEnabled = true;
+        return draft;
+      });
+      const migrated: boolean = this.savedDrafts.some((draft: RecordDraft, index: number): boolean => {
+        return draft !== loaded[index];
+      });
+      if (migrated) {
+        await this.diaryStorage.saveAll(context, this.savedDrafts);
+      }
     } catch (error) {
       this.savedDrafts = [];
     }
@@ -235,6 +267,18 @@ struct Index {
             this.activeTab = '我的';
           }
         })
+      } else if (this.bindingHealth) {
+        HealthBindingPage({
+          onBack: () => {
+            this.bindingHealth = false;
+          },
+          onBound: (steps: number) => {
+            this.healthBound = true;
+            this.healthStepsToday = steps;
+            this.bindingHealth = false;
+            this.activeTab = '我的';
+          }
+        })
       } else if (this.takingQuiz) {
         QuizPage({
           onBack: () => {
@@ -247,7 +291,7 @@ struct Index {
           selectedTab: this.activeTab,
           savedDrafts: this.savedDrafts,
           onNavigate: (tab: string) => {
-            this.activeTab = tab;
+            this.switchTab(tab);
           }
         })
       } else if (this.activeTab === '足迹' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
@@ -255,13 +299,15 @@ struct Index {
           selectedTab: this.activeTab,
           savedDrafts: this.savedDrafts,
           onNavigate: (tab: string) => {
-            this.activeTab = tab;
+            this.switchTab(tab);
           }
         })
       } else if (this.activeTab === '我的' && !this.viewingDiary && !this.editingRecord && !this.pickingBehavior) {
         MyPage({
           selectedTab: this.activeTab,
           savedDrafts: this.savedDrafts,
+          healthBound: this.healthBound,
+          healthStepsToday: this.healthStepsToday,
           onRestoreRecords: (records: RecordDraft[]) => {
             this.savedDrafts = records;
             this.persistAllDrafts(records);
@@ -269,6 +315,9 @@ struct Index {
           onStartImageCertification: () => {
             this.activeTab = '日记';
             this.pickingBehavior = true;
+          },
+          onStartHealthBinding: () => {
+            this.bindingHealth = true;
           },
           onStartQuiz: () => {
             this.activeTab = '我的';
@@ -282,7 +331,7 @@ struct Index {
             if (tab === '我的') {
               return;
             }
-            this.activeTab = tab;
+            this.switchTab(tab);
           }
         })
       } else if (this.viewingDiary && this.openedDraft() !== undefined) {
@@ -369,7 +418,7 @@ struct Index {
           },
           onOpenCalendar: () => this.openCalendar(),
           onSelectTab: (tab: string) => {
-            this.activeTab = tab;
+            this.switchTab(tab);
           }
         })
       }

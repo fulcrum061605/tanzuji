@@ -39,6 +39,7 @@ export struct Login {
   /**
    * 切换登录/注册模式
    * 切换时清空密码相关输入与历史反馈，避免敏感内容跨模式残留
+   * @returns 无返回值；提交过程中不做切换
    */
   private switchMode(): void {
     // 提交中不允许切换，防止状态错乱
@@ -58,6 +59,7 @@ export struct Login {
    * 提交登录或注册
    * 注册模式先校验两次密码一致，再调用认证服务；
    * 成功后按模式分流：注册成功切回登录页，登录成功写入全局用户信息并回调父组件
+   * @returns Promise<void>；服务调用异常已在方法内部处理，不会向外抛出
    */
   private async submit(): Promise<void> {
     // 正在提交时直接返回，防止重复触发
@@ -200,6 +202,7 @@ export struct Login {
             .onClick(() => { this.showPassword = !this.showPassword; })
         }
       }
+      // 背景设置在整个 Row 上，使密码输入框与眼睛按钮在视觉上构成一个整体输入域
       .width('100%')
       .backgroundColor('#EAF2E8')
       .borderRadius(14)
@@ -299,6 +302,7 @@ export struct Login {
           .justifyContent(FlexAlign.Center)
           .width('100%')
         }
+        // 登录卡片样式：米白卡面、浅绿描边、大圆角
         .width('100%')
         .padding(24)
         .backgroundColor('#FAFBF6')
@@ -312,6 +316,7 @@ export struct Login {
       .constraintSize({ maxWidth: 440 })
       .padding({ left: 24, right: 24, top: 36, bottom: 32 })
     }
+    // 页面根容器：全屏铺满、内容水平居中、不显示滚动条、纸张米白底色
     .width('100%')
     .height('100%')
     .align(Alignment.Center)

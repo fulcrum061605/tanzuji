@@ -236,7 +236,13 @@ export struct QuizPage {
         }.width('100%')
         if (this.phase === 'correctWait' || this.phase === 'wrongPause') {
           Column({ space: 8 }) {
-            Text(this.feedback).fontSize(18).fontWeight(FontWeight.Medium)
+            Text(this.feedback)
+              .width('100%')
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .fontSize(16)
+              .fontWeight(FontWeight.Medium)
+              .textAlign(TextAlign.Start)
               .fontColor(this.phase === 'correctWait' ? '#2F7A57' : '#8B5555')
             Text(this.currentQuestion().explanation).width('100%').fontSize(15).fontColor('#5E7468').lineHeight(23)
             Text(`来源：${this.currentQuestion().source}`).width('100%').fontSize(11).fontColor('#89958E')

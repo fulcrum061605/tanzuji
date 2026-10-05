@@ -1,9 +1,9 @@
 /**
  * 碳记 · 日记首页（2026-09-27 确认稿）
- * 首页同时展示本地持久化记录与明确标注的演示数据；演示数据不进入真实统计。
+ * 首页只展示本地持久化记录，避免演示数据被误认为用户真实行为。
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览。
  * 小体积本地素材同步加载，确保组件静态预览首帧完整；未来用户照片应改回异步加载。
- * 下一步接入真实数据时替换 diaryEntries 和概览；通过回调连接录入、日期、搜索和其他栏目。
+ * 通过回调连接录入、日期、搜索和其他栏目。
  */
 
 import { uiMaterial } from '@kit.ArkUI';
@@ -166,8 +166,15 @@ export struct Home {
       lightEffect: { color: undefined }
     })
     : undefined;
-  /** 日记列表数据源：当前为静态示例数据，接入真实数据后替换 */
-  private diaryEntries: DiaryEntry[] = DIARY_EXAMPLES;
+  /** 日记列表只使用入口传入的本地持久化记录。 */
+  private diaryEntries: DiaryEntry[] = [];
+
+  /** AI 认证旧数据兼容：已确认且无风险的记录按已核验显示。 */
+  private isVerifiedDraft(draft: RecordDraft): boolean {
+    return draft.verificationStatus === 'verified' ||
+      (draft.verificationKind === 'ai_assisted' && draft.aiStatus !== 'rejected' &&
+        (draft.riskFlags ?? []).length === 0 && draft.amount > 0);
+  }
 
   /** 将详情页草稿转换为首页日记条目，最新保存的记录排在最前面。 */
   private combinedEntries(): DiaryEntry[] {
@@ -182,14 +189,14 @@ export struct Home {
         time: this.formatTime(draft.recordedAt ?? draft.createdAt ?? Date.now()),
         title: title,
         content: content,
-        label: draft.verificationStatus === 'verified'
+        label: this.isVerifiedDraft(draft)
           ? `${draft.behavior.name} · ${amountWithUnit(draft.amount, draft.unit)} · 已核验`
           : `${draft.behavior.name} · 待核实`,
         icon: draft.behavior.icon,
         photoUri: draft.photoUri,
         reductionKg: draft.reductionKg,
-        verificationStatus: draft.verificationStatus,
-        scoreEnabled: draft.scoreEnabled && draft.verificationStatus === 'verified',
+        verificationStatus: this.isVerifiedDraft(draft) ? 'verified' : draft.verificationStatus,
+        scoreEnabled: draft.scoreEnabled && this.isVerifiedDraft(draft),
         recordedAt: draft.recordedAt ?? draft.createdAt
       };
     });
@@ -292,7 +299,7 @@ export struct Home {
         .height(42)
         .opacity(0.55)
       Text(this.searchText.trim().length > 0 ? '没找到相关记录，换个关键词试试' :
-        (this.isTodaySelected() ? '今天还没有记录，点下面的 + 记一笔' : '这一天还没有可查看的记录'))
+        (this.isTodaySelected() ? '今天还没有记录，点下面的 + 去记录' : '这一天还没有可查看的记录'))
         .fontSize(15)
         .fontColor('#718078')
         .textAlign(TextAlign.Center)
@@ -383,7 +390,7 @@ export struct Home {
         if (this.pressedTab === tab) {
           this.pressedTab = '';
         }
-      }, 120);
+      }, 180);
       return;
     }
     if (this.onSelectTab) {
@@ -395,7 +402,7 @@ export struct Home {
           this.pressedTab = '';
         }
         this.onSelectTab?.(tab);
-      }, 120);
+      }, 180);
     } else if (tab === '日记' || tab === '成长') {
       this.selectedTab = tab;
     } else {
@@ -428,9 +435,9 @@ export struct Home {
     Stack({ alignContent: Alignment.Center }) {
       // 左右图标按钮行
       Row() {
-        // 左侧：日历入口按钮（透明背景，仅显示图标）
+        // 左侧：菜单图标（暂不增加功能），中间日期仍负责打开日历
         Button({ type: ButtonType.Normal }) {
-          Image($r('app.media.diary_calendar'))
+          Image($r('app.media.diary_menu'))
             .syncLoad(true)
             .width(29)
             .height(29)
@@ -440,8 +447,7 @@ export struct Home {
         .padding(8)
         .backgroundColor(Color.Transparent)
         .borderRadius(16)
-        .accessibilityText('选择日记日期')
-        .onClick(() => this.openCalendar())
+        .accessibilityText('菜单')
 
         // 弹性占位：将右侧按钮推至行尾
         Blank()

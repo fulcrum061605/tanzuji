@@ -360,7 +360,7 @@ export struct FootprintPage {
         if (this.pressedTab === tab) {
           this.pressedTab = '';
         }
-      }, 120);
+      }, 180);
       return;
     }
     if (this.onNavigate) {
@@ -370,7 +370,7 @@ export struct FootprintPage {
           this.pressedTab = '';
         }
         this.onNavigate?.(tab);
-      }, 120);
+      }, 180);
     }
   }
 
@@ -386,9 +386,6 @@ export struct FootprintPage {
           .fontSize(27)
           .fontWeight(FontWeight.Bold)
           .fontColor('#123F2E')
-        Text('已核验的低碳成果')
-          .fontSize(13)
-          .fontColor('#718078')
       }
       .alignItems(HorizontalAlign.Start)
       Blank()
@@ -406,7 +403,8 @@ export struct FootprintPage {
       }
     }
     .width('100%')
-    .padding({ left: 22, right: 22, top: 12, bottom: 14 })
+    .height(52)
+    .padding({ left: 22, right: 22 })
   }
 
   /**
@@ -522,7 +520,7 @@ export struct FootprintPage {
       // 柱状数据点行：底部对齐，数据点多时缩小字号
       Row({ space: 5 }) {
         if (this.data().verifiedCount === 0) {
-          Text('暂无已核验数据，先去记一笔')
+          Text('暂无已核验数据，先去记录')
             .fontSize(14)
             .fontColor('#8A968F')
             .height(96)
@@ -592,7 +590,7 @@ export struct FootprintPage {
           .height(132)
           .onReady((): void => this.drawLineChart())
         if (this.data().verifiedCount === 0) {
-          Text('暂无已核验数据，先去记一笔')
+          Text('暂无已核验数据，先去记录')
             .fontSize(13)
             .fontColor('#8A968F')
         }
@@ -705,7 +703,7 @@ export struct FootprintPage {
       }
       .width('100%')
       if (this.data().categories.length === 0) {
-        Text('暂无已核验数据，先去记一笔')
+        Text('暂无已核验数据，先去记录')
           .fontSize(13)
           .fontColor('#8A968F')
           .height(150)

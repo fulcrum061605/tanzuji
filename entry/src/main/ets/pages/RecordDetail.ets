@@ -6,6 +6,11 @@
  * 减排系数是公开数据的近似简化值，仅供记录参考；保存结果经 onSave 回调交给父组件，
  * 入口页负责把记录写入本地 Preferences，并在首页、足迹和我的页面复用同一份数据。
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览；文末提供独立 @Preview 预览入口。
+ *
+ * 核验与积分口径（与 CarbonEvidenceService / CarbonPointsService 约定一致）：
+ * - location：系统定位轨迹测量；health：华为运动健康当日步数（按 STEP_TO_KM = 0.0007 公里/步换算）；
+ * - ai_image：端侧 Core Vision Kit OCR 识别，用户保存确认后按 verified 入账，积分按系统核验积分折半；
+ * - manual：手动记录，一律 pending 待核实，scoreEnabled 为 false，不计入正式碳积分。
  */
 import { BehaviorOption } from './BehaviorPicker';
 import { common } from '@kit.AbilityKit';
@@ -138,7 +143,7 @@ export struct RecordDetail {
   @State private measurementMessage: string = '';
   /** 是否正在进行系统定位测量 */
   @State private tracking: boolean = false;
-  /** AI 图片辅助认证状态；只用于草稿和受限积分，不改变正式核验状态。 */
+  /** AI 图片辅助认证状态；确认后作为已核验记录入账，但积分按系统核验积分折半。 */
   @State private aiStatus: 'none' | 'draft' | 'confirmed' | 'rejected' = 'none';
   @State private aiProvider: string = '';
   @State private aiConfidence: number = 0;
@@ -325,7 +330,11 @@ export struct RecordDetail {
       this.aiStatus = 'confirmed';
     }
     const aiConfirmed: boolean = this.evidenceSource === 'ai_image' && this.aiStatus === 'confirmed';
+    // 设备 OCR 不可用时允许用户手动确认数量，但降级为待核实记录，不计正式减排和积分。
+    const aiManualFallback: boolean = this.evidenceSource === 'ai_image' &&
+      this.aiStatus === 'rejected' && amount > 0;
     if (amount <= 0 || (this.isAutoMeasured() && !aiConfirmed &&
+      !aiManualFallback &&
       (amount <= 0.05 || this.verificationStatus !== 'verified' ||
         (this.evidenceSource !== 'location' && this.evidenceSource !== 'health')))) {
       this.showSaveHint(amount);
@@ -336,9 +345,11 @@ export struct RecordDetail {
       return;
     }
     const now: number = Date.now();
-    const evidenceSource: EvidenceSource = this.isAutoMeasured() ? this.evidenceSource : 'manual';
-    const verificationStatus: 'verified' | 'pending' = aiConfirmed ? 'pending' :
-      (this.isAutoMeasured() ? this.verificationStatus : 'pending');
+    const evidenceSource: EvidenceSource = aiManualFallback ? 'manual' :
+      (this.isAutoMeasured() ? this.evidenceSource : 'manual');
+    const verificationStatus: 'verified' | 'pending' = aiConfirmed ? 'verified' :
+      (aiManualFallback ? 'pending' :
+        (this.isAutoMeasured() ? this.verificationStatus : 'pending'));
     this.onSave?.({
       recordId: this.initialDraft?.recordId ?? `${this.behavior.id}-${now}-${Math.floor(Math.random() * 100000)}`,
       operationId: this.initialDraft?.operationId ?? `${this.behavior.id}-${Date.now()}`,
@@ -356,8 +367,8 @@ export struct RecordDetail {
       evidenceSource: evidenceSource,
       verificationStatus: verificationStatus,
       evidenceId: this.evidenceId,
-      scoreEnabled: verificationStatus === 'verified' && evidenceSource !== 'manual' && evidenceSource !== 'ai_image',
-      verificationKind: evidenceSource === 'ai_image' ? 'ai_assisted' :
+      scoreEnabled: verificationStatus === 'verified' && evidenceSource !== 'manual',
+      verificationKind: aiConfirmed ? 'ai_assisted' :
         (evidenceSource === 'manual' ? 'manual' : 'system'),
       aiProvider: this.aiProvider,
       aiStatus: this.aiStatus,
@@ -382,6 +393,8 @@ export struct RecordDetail {
       message = '请先填写完成数量，或点击测量获取真实数据';
     } else if (!this.factorService.supports(this.behavior.id, this.selectedUnit)) {
       message = '当前行为暂无碳因子，无法保存';
+    } else if (this.evidenceSource === 'ai_image' && this.aiStatus === 'rejected') {
+      message = '端侧 OCR 暂不可用，请手动确认数量后保存';
     }
     this.getUIContext().getPromptAction().showToast({ message: message, duration: 1600 });
   }
@@ -498,13 +511,14 @@ export struct RecordDetail {
 
   /**
    * 调用端侧 OCR 识别选中的图片
-   * 识别成功后仅填充草稿（数量、单位、置信度与风险标记），证据来源切换为 ai_image、
-   * 核验状态保持待核实；最终仍需用户点击保存确认。
+   * 识别成功后填充草稿（数量、单位、置信度与风险标记），证据来源切换为 ai_image；
+   * 无风险且用户保存确认后作为已核验记录入库，积分由服务层按系统核验积分折半。
    * @param uri 系统相册授权的图片 URI
    */
   private async recognizePhoto(uri: string): Promise<void> {
     this.measurementMessage = '正在使用华为端侧 OCR 识别图片……';
-    const result: AiRecognitionDraft = await this.aiService.recognize(uri, this.behavior.name);
+    const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+    const result: AiRecognitionDraft = await this.aiService.recognize(context, uri, this.behavior.name);
     this.aiProvider = result.provider;
     this.aiConfidence = result.confidence;
     this.aiRecognizedBehavior = result.recognizedBehavior;
@@ -521,14 +535,14 @@ export struct RecordDetail {
       this.selectedUnit = result.unit;
     }
     if (result.riskFlags.length === 0) {
-      this.measurementMessage = '识别完成，请确认行为和数量后保存；本条为 AI 辅助核验';
+      this.measurementMessage = '识别完成，请确认行为和数量后保存；核验成功按系统积分一半计入';
     } else {
       this.measurementMessage = `识别完成：${result.riskFlags.join('、')}，请确认后保存`;
     }
   }
 
   /**
-   * 顶部导航栏：居中标题（新建"记一笔"/编辑"编辑记录"） + 左侧返回按钮
+   * 顶部导航栏：居中标题（新建"去记录"/编辑"编辑记录"） + 左侧返回按钮
    */
   @Builder
   private Header() {
@@ -556,7 +570,7 @@ export struct RecordDetail {
       .padding({ left: 15, right: 15 })
 
       // 上层：居中的页面标题（新建与编辑使用不同标题，避免录入页误标为"详情"）
-      Text(this.initialDraft === undefined ? '记一笔' : '编辑记录')
+      Text(this.initialDraft === undefined ? '去记录' : '编辑记录')
         .fontSize(21)
         .fontWeight(FontWeight.Bold)
         .fontColor('#123F2E')

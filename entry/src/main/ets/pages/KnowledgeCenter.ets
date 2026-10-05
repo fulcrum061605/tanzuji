@@ -1,15 +1,26 @@
 /**
  * 成长 · 双碳知识中心。
  * 文章正文由 rawfile 内置资源提供，可离线搜索和阅读；收藏保存在本机 Preferences。
+ * 内置文章由 KnowledgeService 解析 rawfile 下的 carbon_knowledge.json，并与管理员自定义文档合并；
+ * 收藏列表与自定义文档持久化在设备本地，因此搜索、阅读、收藏全程可离线使用。
+ * “推荐”分类基于用户真实低碳记录（savedDrafts）与收藏偏好做本地加权排序，其余分类展示全部文章；
+ * 文章详情页附可追溯的资料来源（机构/标题/网址），内容涵盖绿色校园、绿色消费、碳达峰碳中和等主题。
  */
+// AbilityKit：提供 common.Context 类型，用于获取组件宿主上下文（读取 rawfile 与本机存储）
 import { common } from '@kit.AbilityKit';
+// ArkUI：提供 uiMaterial 模块，用于构建底部导航的沉浸式材质（液态玻璃）
 import { uiMaterial } from '@kit.ArkUI';
+// BasicServicesKit：提供 deviceInfo，读取 SDK API 版本以判断设备是否支持液态玻璃
 import { deviceInfo } from '@kit.BasicServicesKit';
+// 知识文章数据模型与知识服务：负责 rawfile 文章加载、收藏与管理员文档的持久化
 import { KnowledgeArticle, KnowledgeService } from '../services/KnowledgeService';
+// 低碳记录草稿模型：其 behavior.id 是“推荐”分类个性化排序的行为数据来源
 import { RecordDraft } from './RecordDetail';
 
+// 注意：管理员可输入自定义分类，不在本列表中的分类没有对应胶囊按钮，
+// 此类文章仅在“推荐”（浏览全部）与“收藏”视图中可见。
 /** 分类筛选栏的固定选项：'收藏' 视图复用收藏数据 */
-const KNOWLEDGE_CATEGORIES: string[] = ['全部', '双碳基础', '生活技巧', '校园行动', '收藏'];
+const KNOWLEDGE_CATEGORIES: string[] = ['推荐', '双碳基础', '生活技巧', '校园行动', '收藏'];
 
 /** 离线推荐评分后的文章包装：文章与推荐得分配对 */
 interface ScoredArticle {
@@ -33,6 +44,8 @@ function isGlassCapable(): boolean {
  * 双碳知识中心组件
  * 页面结构：搜索头部（标题/管理员入口/搜索框） + 分类筛选栏 + 文章列表 / 文章详情 / 管理员编辑器 + 底部导航。
  * 支持关键字搜索、分类过滤、收藏切换与管理员新增文档。
+ * 数据流：aboutToAppear 时经 KnowledgeService 读取 rawfile 文章与本机收藏，
+ * 此后搜索/筛选/收藏/新增文档均在内存态完成并按需落盘，全程离线可用。
  */
 @Component
 export struct KnowledgeCenter {
@@ -50,8 +63,8 @@ export struct KnowledgeCenter {
   @State private favoriteIds: string[] = [];
   /** 搜索框内容：作为标题/摘要/关键字/正文的过滤条件 */
   @State private searchText: string = '';
-  /** 当前选中的分类：'全部' 表示不过滤，'收藏' 表示只看收藏 */
-  @State private selectedCategory: string = '全部';
+  /** 当前选中的分类：'推荐' 使用本地个性化推荐，'收藏' 表示只看收藏 */
+  @State private selectedCategory: string = '推荐';
   /** 当前打开的文章 id：非空时进入文章详情视图 */
   @State private openedArticleId: string = '';
   /** 内容加载中标记：控制加载态与列表视图的切换 */
@@ -140,7 +153,7 @@ export struct KnowledgeCenter {
   /** 推荐文章区域：搜索或分类筛选时隐藏，避免干扰用户主动查找。 */
   @Builder
   private RecommendationSection() {
-    if (this.searchText.trim().length === 0 && this.selectedCategory === '全部' && this.recommendedArticles.length > 0) {
+    if (this.searchText.trim().length === 0 && this.selectedCategory === '__legacy__' && this.recommendedArticles.length > 0) {
       Column({ space: 8 }) {
         Row() {
           Text('为你推荐')
@@ -219,9 +232,10 @@ export struct KnowledgeCenter {
    */
   private filteredArticles(): KnowledgeArticle[] {
     const keyword: string = this.searchText.trim().toLowerCase().replace(/\s/g, '');
-    return this.articles.filter((article: KnowledgeArticle): boolean => {
+    const filtered: KnowledgeArticle[] = this.articles.filter((article: KnowledgeArticle): boolean => {
       // 分类过滤
-      const categoryMatched: boolean = this.selectedCategory === '全部' ||
+      // “推荐”沿用原“全部”的浏览范围；个性化文章只作为推荐顺序依据，不隐藏其余文章。
+      const categoryMatched: boolean = this.selectedCategory === '推荐' ||
         (this.selectedCategory === '收藏' && this.isFavorite(article.id)) ||
         article.category === this.selectedCategory;
       if (!categoryMatched) {
@@ -237,6 +251,14 @@ export struct KnowledgeCenter {
         `${article.sourceUrl}${article.paragraphs.join('')}`;
       return searchable.toLowerCase().replace(/\s/g, '').includes(keyword);
     });
+    if (this.selectedCategory === '推荐' && keyword.length === 0) {
+      const rank = (article: KnowledgeArticle): number => {
+        const index: number = this.recommendedArticles.findIndex((item: KnowledgeArticle): boolean => item.id === article.id);
+        return index < 0 ? 999 : index;
+      };
+      return filtered.slice().sort((left: KnowledgeArticle, right: KnowledgeArticle): number => rank(left) - rank(right));
+    }
+    return filtered;
   }
 
   /**
@@ -278,7 +300,7 @@ export struct KnowledgeCenter {
         if (this.pressedTab === tab) {
           this.pressedTab = '';
         }
-      }, 120);
+      }, 180);
       return;
     }
     if (this.onNavigate) {
@@ -288,7 +310,7 @@ export struct KnowledgeCenter {
           this.pressedTab = '';
         }
         this.onNavigate?.(tab);
-      }, 120);
+      }, 180);
     }
   }
 
@@ -300,8 +322,8 @@ export struct KnowledgeCenter {
     Column({ space: 12 }) {
       // 顶行：左侧页面标题 + 右侧管理员入口与文章总数（底部导航已标明"成长"栏目，页内不再重复）
       Row() {
-        Text('低碳知识与行动')
-          .fontSize(19)
+        Text('成长')
+          .fontSize(27)
           .fontWeight(FontWeight.Bold)
           .fontColor('#123F2E')
         Blank()
@@ -328,6 +350,7 @@ export struct KnowledgeCenter {
           .fontColor('#718078')
       }
       .width('100%')
+      .height(52)
 
       // 搜索框：搜索图标 + 输入框，关键字变化实时刷新列表
       Row({ space: 9 }) {
@@ -354,7 +377,7 @@ export struct KnowledgeCenter {
       .borderRadius(24)
     }
     .width('100%')
-    .padding({ left: 20, right: 20, top: 8 })
+    .padding({ left: 22, right: 22 })
   }
 
   /** 清空管理员编辑器全部字段，恢复默认分类 */
@@ -512,27 +535,13 @@ export struct KnowledgeCenter {
 
   /**
    * 单篇文章列表行
-   * 左侧圆形图标底托 + 中部（分类/时长、标题、摘要） + 右侧收藏按钮；整行点击进入详情
+   * 左侧文字信息 + 右侧收藏按钮；整行点击进入详情
    * @param article 文章数据
    */
   @Builder
   private ArticleRow(article: KnowledgeArticle) {
-    Row({ space: 14 }) {
-      // 左侧：圆形浅绿底托 + 分类图标
-      Stack({ alignContent: Alignment.Center }) {
-        Row()
-          .width(52)
-          .height(52)
-          .borderRadius(26)
-          .backgroundColor('#EAF0E5')
-        Image(this.articleIcon(article))
-          .syncLoad(true)
-          .width(32)
-          .height(32)
-          .padding(article.illustration === 'travel' ? 0 : 2)
-      }
-
-      // 中部：分类与阅读时长、标题、摘要，超长省略
+    Row({ space: 10 }) {
+      // 文字从行首开始，保证成长页文章列表紧凑、连续
       Column({ space: 5 }) {
         Row({ space: 8 }) {
           Text(article.category)
@@ -576,7 +585,7 @@ export struct KnowledgeCenter {
       .onClick((): void => this.toggleFavorite(article.id))
     }
     .width('100%')
-    .padding({ top: 18, bottom: 18 })
+    .padding({ top: 15, bottom: 15 })
     .alignItems(VerticalAlign.Top)
     // 整行点击进入文章详情
     .onClick((): void => {
@@ -898,7 +907,6 @@ export struct KnowledgeCenter {
             Column() {
               // 分类栏固定紧跟搜索框；点击“全部”时也不会被推荐区挤到下面。
               this.CategoryBar()
-              this.RecommendationSection()
               this.ArticleList()
             }
             .width('100%')
