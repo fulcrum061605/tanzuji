@@ -87,6 +87,8 @@ export struct MyPage {
   onStartQuiz?: () => void;
   /** 打开离线低碳足迹棋盘。 */
   onStartFootprintGame?: () => void;
+  /** 打开家庭碳账户页：本机多人协作记录低碳行为。 */
+  onStartFamily?: () => void;
   /** 全部文章列表：用于渲染收藏项与详情 */
   @State private articles: KnowledgeArticle[] = [];
   /** 已收藏的文章 id 列表 */
@@ -99,6 +101,8 @@ export struct MyPage {
   @State private showingDataManagement: boolean = false;
   /** 最近一次导出的 CSV 报表内容；空串时不显示预览区 */
   @State private csvPreview: string = '';
+  /** 最近一次备份摘要（时间与内容规模），数据管理页展示 */
+  @State private lastBackupSummary: string = '';
   /** 当前打开的收藏文章 id：非空时进入文章详情视图 */
   @State private openedArticleId: string = '';
   /** 内容加载中标记 */
@@ -120,6 +124,8 @@ export struct MyPage {
   @State private claimedTaskKeys: string[] = [];
   /** 已兑换（已领取）的模拟权益 id 列表 */
   @State private redeemedRewardIds: string[] = [];
+  /** 与 redeemedRewardIds 一一对应的权益兑换日期，荣誉墙展示用 */
+  @State private redeemedRewardDates: string[] = [];
   /** 签到请求进行中标记：防止重复点击 */
   @State private checkingIn: boolean = false;
   /** 正在兑换的权益 id：空串表示没有进行中的兑换 */
@@ -156,6 +162,7 @@ export struct MyPage {
     }
     this.loadFavorites();
     this.loadPoints();
+    this.refreshBackupSummary();
   }
 
   /**
@@ -171,6 +178,7 @@ export struct MyPage {
       this.claimedCheckIn = snapshot.claimedTaskKeys.includes(`check-in-${this.todayKey()}`);
       this.claimedTaskKeys = snapshot.claimedTaskKeys;
       this.redeemedRewardIds = snapshot.redeemedRewardIds;
+      this.redeemedRewardDates = snapshot.redeemedRewardDates ?? [];
     } catch (error) {
       this.showToast('积分数据暂时无法读取');
     }
@@ -317,19 +325,59 @@ export struct MyPage {
       const pointsSnapshot: PointsSnapshot = await this.pointsService.load(context);
       await this.backupService.backup(context, this.savedDrafts, pointsSnapshot, this.favoriteIds);
       this.showToast(`已备份 ${this.savedDrafts.length} 条记录`);
+      this.refreshBackupSummary();
     } catch (error) {
       this.showToast('备份失败，请稍后重试');
     }
   }
 
   /**
-   * 恢复前二次确认
-   * 恢复会用最近一次备份覆盖当前的记录、积分与收藏，为避免误触丢数据先弹窗确认
+   * 读取最近一次备份并刷新摘要文案（时间、记录数、积分与收藏数）
+   * 供数据管理页展示，让用户在恢复前就能了解备份内容
    */
-  private confirmRestore(): void {
+  private async refreshBackupSummary(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const payload: BackupPayload = await this.backupService.restore(context);
+      if (payload.version === 0) {
+        this.lastBackupSummary = '还没有本地备份，建议先备份当前记录';
+        return;
+      }
+      const date: Date = new Date(payload.exportedAt);
+      const time: string =
+        `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+      this.lastBackupSummary =
+        `上次备份：${time} · ${payload.records.length} 条记录 · 积分余额 ${payload.points.balance} · 收藏 ${payload.favoriteIds.length} 篇`;
+    } catch (error) {
+      this.lastBackupSummary = '备份信息暂时无法读取';
+    }
+  }
+
+  /**
+   * 恢复前二次确认
+   * 先读取最近一次备份摘要（时间、记录数、积分与收藏数）展示在确认弹窗中，
+   * 让用户在覆盖前清楚知道将要恢复的内容；无备份时直接提示。
+   */
+  private async confirmRestore(): Promise<void> {
+    let summary: string = '';
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const payload: BackupPayload = await this.backupService.restore(context);
+      if (payload.version === 0) {
+        this.showToast('没有可恢复的本地备份');
+        return;
+      }
+      const date: Date = new Date(payload.exportedAt);
+      const time: string =
+        `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')} ${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
+      summary = `最近备份：${time}\n包含 ${payload.records.length} 条记录、积分余额 ${payload.points.balance}、收藏 ${payload.favoriteIds.length} 篇。\n\n恢复将覆盖当前全部记录、积分与收藏，覆盖后无法撤销。`;
+    } catch (error) {
+      this.showToast('备份信息暂时无法读取');
+      return;
+    }
     this.getUIContext().showAlertDialog({
       title: '确认恢复备份',
-      message: '恢复将用最近一次备份覆盖当前的记录、积分与收藏，覆盖后无法撤销。确定继续吗？',
+      message: summary,
       primaryButton: {
         value: '取消',
         action: (): void => {}
@@ -372,7 +420,7 @@ export struct MyPage {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       this.csvPreview = await this.backupService.exportCsv(context, this.savedDrafts);
-      this.showToast('CSV 报表已生成，可在下方查看');
+      this.showToast(`已生成 ${this.savedDrafts.length} 条记录的 CSV 报表`);
     } catch (error) {
       this.showToast('报表生成失败，请稍后重试');
     }
@@ -408,6 +456,27 @@ export struct MyPage {
       case 'campus': return $r('app.media.diary_sprout');
       case 'policy': return $r('app.media.diary_diary');
       default: return $r('app.media.diary_leaf');
+    }
+  }
+
+  /**
+   * 按插图类型映射文章详情配图资源
+   * 与成长页详情共用同一组内置配图；未知类型回落到树苗风景图。
+   * @param article 文章数据
+   * @returns 对应的配图资源
+   */
+  private articleBanner(article: KnowledgeArticle): Resource {
+    switch (article.illustration) {
+      case 'peak': return $r('app.media.banner_peak');
+      case 'neutral': return $r('app.media.banner_neutral');
+      case 'policy': return $r('app.media.banner_policy');
+      case 'travel': return $r('app.media.banner_travel');
+      case 'electricity': return $r('app.media.banner_electricity');
+      case 'food': return $r('app.media.banner_food');
+      case 'recycle': return $r('app.media.banner_recycle');
+      case 'campus': return $r('app.media.banner_campus');
+      case 'reuse': return $r('app.media.banner_reuse');
+      default: return $r('app.media.banner_sprout');
     }
   }
 
@@ -741,6 +810,17 @@ export struct MyPage {
     return this.redeemedRewardIds.includes(reward.id);
   }
 
+  /** 按兑换顺序号取兑换日期；快照缺失日期时返回空串 */
+  private rewardDate(index: number): string {
+    return index < this.redeemedRewardDates.length ? this.redeemedRewardDates[index] : '';
+  }
+
+  /** 植树证书编号：由兑换日期与顺序号生成，稳定可追溯 */
+  private certificateNo(index: number): string {
+    const compact: string = this.rewardDate(index).split('-').join('');
+    return `TANJI-ZS-${compact.length > 0 ? compact : '20260000'}-${(index + 1).toString().padStart(2, '0')}`;
+  }
+
   /**
    * 单条模拟权益行：图标 + 标题/说明/所需积分 + 右侧兑换按钮
    * 余额不足或已领取时按钮置灰；兑换中显示"兑换中…"
@@ -789,6 +869,185 @@ export struct MyPage {
     .backgroundColor('#FAFBF6')
     .border({ width: 1, color: '#E1E9DF' })
     .borderRadius(14)
+  }
+
+  /**
+   * 植树证书卡片：兑换"虚拟植树证书"后展示的证书样式（编号、落款、寄语）
+   * @param index 权益在已兑换列表中的顺序号
+   */
+  @Builder
+  private TreeCertificateCard(index: number) {
+    Column({ space: 10 }) {
+      Row({ space: 10 }) {
+        Stack({ alignContent: Alignment.Center }) {
+          Row().width(40).height(40).borderRadius(20).backgroundColor('#E6F1E4')
+          Image($r('app.media.diary_sprout'))
+            .syncLoad(true)
+            .width(24)
+            .height(24)
+        }
+        Column({ space: 3 }) {
+          Text('低碳行动植树证书')
+            .fontSize(16)
+            .fontWeight(FontWeight.Bold)
+            .fontColor('#123F2E')
+          Text(this.rewardDate(index).length > 0 ? `${this.rewardDate(index)} 兑换` : '虚拟植树纪念')
+            .fontSize(12)
+            .fontColor('#78867D')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+      }
+      .width('100%')
+      Text('感谢你用日常低碳行动，为地球种下一抹绿色。')
+        .width('100%')
+        .fontSize(14)
+        .fontColor('#567064')
+        .lineHeight(22)
+      Row() {
+        Text(`证书编号 ${this.certificateNo(index)}`)
+          .fontSize(11)
+          .fontColor('#4C8067')
+        Blank()
+        Text('碳记 · 虚拟植树纪念')
+          .fontSize(11)
+          .fontColor('#9A7A3C')
+      }
+      .width('100%')
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor('#FFFFFF')
+    .border({ width: 1.5, color: '#BFD8BE' })
+    .borderRadius(16)
+    .margin({ left: 22, right: 22 })
+  }
+
+  /**
+   * 低碳徽章卡片：兑换"校园绿能徽章"后点亮的圆形徽章展示
+   * @param index 权益在已兑换列表中的顺序号
+   */
+  @Builder
+  private BadgeCard(index: number) {
+    Row({ space: 14 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row().width(58).height(58).borderRadius(29).backgroundColor('#EAF3E7')
+        Row().width(58).height(58).borderRadius(29).border({ width: 2, color: '#D4A24C' })
+        Image($r('app.media.diary_leaf'))
+          .syncLoad(true)
+          .width(30)
+          .height(30)
+      }
+      Column({ space: 4 }) {
+        Text('校园绿能徽章')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#123F2E')
+        Text('已点亮的虚拟低碳徽章，感谢你的绿色坚持')
+          .fontSize(12)
+          .fontColor('#78867D')
+        Text(this.rewardDate(index).length > 0 ? `获得于 ${this.rewardDate(index)}` : '已获得')
+          .fontSize(12)
+          .fontColor('#4C8067')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor('#FFFFFF')
+    .border({ width: 1, color: '#E1E9DF' })
+    .borderRadius(16)
+    .margin({ left: 22, right: 22 })
+  }
+
+  /**
+   * 优惠券卡片：兑换"低碳出行优惠券"后展示的模拟权益码
+   * @param index 权益在已兑换列表中的顺序号
+   */
+  @Builder
+  private CouponCard(index: number) {
+    Row({ space: 14 }) {
+      Stack({ alignContent: Alignment.Center }) {
+        Row().width(50).height(50).borderRadius(14).backgroundColor('#EAF3E7')
+        Image($r('app.media.diary_transit'))
+          .syncLoad(true)
+          .width(28)
+          .height(28)
+      }
+      Column({ space: 4 }) {
+        Text('低碳出行优惠券')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#123F2E')
+        Text('权益码 GREEN-TRAVEL-2026')
+          .fontSize(12)
+          .fontColor('#4C8067')
+        Text(this.rewardDate(index).length > 0 ? `${this.rewardDate(index)} 兑换` : '已兑换')
+          .fontSize(12)
+          .fontColor('#78867D')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+    }
+    .width('100%')
+    .padding(16)
+    .backgroundColor('#FFFFFF')
+    .border({ width: 1, color: '#E1E9DF' })
+    .borderRadius(16)
+    .margin({ left: 22, right: 22 })
+  }
+
+  /**
+   * 我的低碳荣誉墙：集中展示已兑换的徽章、植树证书与权益码
+   * 未兑换任何权益时显示引导文案
+   */
+  @Builder
+  private HonorsWall() {
+    Column({ space: 14 }) {
+      Row() {
+        Text('我的低碳荣誉')
+          .fontSize(17)
+          .fontWeight(FontWeight.Bold)
+          .fontColor('#173F2E')
+        Blank()
+        Text(`${this.redeemedRewardIds.length} 项`)
+          .fontSize(12)
+          .fontColor('#87938C')
+      }
+      .width('100%')
+      .padding({ left: 22, right: 22 })
+      if (this.redeemedRewardIds.length === 0) {
+        Column({ space: 8 }) {
+          Image($r('app.media.diary_sprout'))
+            .syncLoad(true)
+            .width(34)
+            .height(34)
+            .opacity(0.7)
+          Text('兑换低碳徽章与植树证书后，荣誉将展示在这里')
+            .fontSize(13)
+            .fontColor('#8A968F')
+        }
+        .width('100%')
+        .padding({ top: 18, bottom: 18 })
+        .backgroundColor('#FAFBF6')
+        .border({ width: 1, color: '#E1E9DF' })
+        .borderRadius(14)
+        .margin({ left: 22, right: 22 })
+      } else {
+        ForEach(this.redeemedRewardIds, (id: string, index: number) => {
+          if (id === 'tree-certificate') {
+            this.TreeCertificateCard(index)
+          } else if (id === 'green-badge') {
+            this.BadgeCard(index)
+          } else {
+            this.CouponCard(index)
+          }
+        }, (id: string): string => `honor-${id}`)
+      }
+    }
+    .width('100%')
+    .padding({ top: 6, bottom: 10 })
   }
 
   /**
@@ -843,6 +1102,7 @@ export struct MyPage {
           ForEach(this.rewardItems, (reward: PointsReward) => {
             this.RewardRow(reward)
           }, (reward: PointsReward): string => reward.id)
+          this.HonorsWall()
           Text(`累计获得 ${this.totalEarnedPoints} 积分 · 核验记录每日上限 30 分`)
             .fontSize(12)
             .fontColor('#8A968F')
@@ -883,6 +1143,22 @@ export struct MyPage {
         Text('本地记录工具').fontSize(20).fontWeight(FontWeight.Bold).fontColor('#123F2E')
         Text('数据只保存在本机。备份用于演示恢复，CSV 可用于老师查看统计明细。')
           .fontSize(13).fontColor('#718078').width('100%')
+        Row({ space: 8 }) {
+          Image($r('app.media.diary_calendar'))
+            .syncLoad(true)
+            .width(16)
+            .height(16)
+            .opacity(0.7)
+          Text(this.lastBackupSummary)
+            .fontSize(12)
+            .fontColor('#4C8067')
+            .layoutWeight(1)
+            .maxLines(2)
+        }
+        .width('100%')
+        .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+        .backgroundColor('#EAF2E8')
+        .borderRadius(10)
         Button('备份当前记录', { type: ButtonType.Capsule, stateEffect: true })
           .width('100%').height(42).backgroundColor('#4C9576').fontColor('#FFFFFF')
           .onClick((): void => { this.backupRecords(); })
@@ -1128,6 +1404,13 @@ export struct MyPage {
       // 正文滚动区
       Scroll() {
         Column({ space: 18 }) {
+          // 文章配图：与成长页详情共用同一组内置配图
+          Image(this.articleBanner(article))
+            .syncLoad(true)
+            .width('100%')
+            .height(170)
+            .borderRadius(14)
+            .objectFit(ImageFit.Cover)
           // 分类与阅读时长信息行
           Row({ space: 14 }) {
             Image(this.articleIcon(article))
@@ -1315,6 +1598,10 @@ export struct MyPage {
             // 菜单入口：我的收藏（显示收藏数量）
             this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.diary_leaf'), () => {
               this.showingFavorites = true;
+            })
+            // 菜单入口：家庭碳账户（本机添加成员、共用记录与家庭周报，不需要联网）
+            this.MenuRow('家庭碳账户', '与家人共用一本低碳账本，协作完成家庭目标', $r('app.media.diary_person'), () => {
+              this.onStartFamily?.();
             })
             // 菜单入口：低碳答题（每日最多获得 4 分，作为知识激励）
             this.MenuRow('低碳答题', '完成每日知识挑战，最高获得 4 积分', $r('app.media.diary_sprout'), () => {

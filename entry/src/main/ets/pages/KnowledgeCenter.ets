@@ -288,6 +288,27 @@ export struct KnowledgeCenter {
   }
 
   /**
+   * 按插图类型映射文章详情配图资源
+   * 配图随 HAP 内置（流程示意图/风景插画），断网同样可读；未知类型回落到树苗风景图。
+   * @param article 文章数据
+   * @returns 对应的配图资源
+   */
+  private articleBanner(article: KnowledgeArticle): Resource {
+    switch (article.illustration) {
+      case 'peak': return $r('app.media.banner_peak');
+      case 'neutral': return $r('app.media.banner_neutral');
+      case 'policy': return $r('app.media.banner_policy');
+      case 'travel': return $r('app.media.banner_travel');
+      case 'electricity': return $r('app.media.banner_electricity');
+      case 'food': return $r('app.media.banner_food');
+      case 'recycle': return $r('app.media.banner_recycle');
+      case 'campus': return $r('app.media.banner_campus');
+      case 'reuse': return $r('app.media.banner_reuse');
+      default: return $r('app.media.banner_sprout');
+    }
+  }
+
+  /**
    * 切换底部栏目
    * 点击当前栏目仅保留按压反馈；切换其他栏目时先播放短暂按压动效再回调入口页
    * @param tab 目标栏目名
@@ -701,6 +722,13 @@ export struct KnowledgeCenter {
       // 正文滚动区
       Scroll() {
         Column({ space: 18 }) {
+          // 文章配图：按主题内置的示意图/风景插画，随 HAP 打包可离线展示
+          Image(this.articleBanner(article))
+            .syncLoad(true)
+            .width('100%')
+            .height(170)
+            .borderRadius(14)
+            .objectFit(ImageFit.Cover)
           // 分类与阅读时长信息行
           Row({ space: 14 }) {
             Image(this.articleIcon(article))

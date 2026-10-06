@@ -22,6 +22,8 @@ import { KnowledgeCenter } from './KnowledgeCenter';
 import { QuizPage } from './QuizPage';
 import { FootprintGamePage } from './FootprintGamePage';
 import { HealthBindingPage } from './HealthBindingPage';
+import { FamilyPage } from './FamilyPage';
+import { FamilyService, FamilySnapshot } from '../services/FamilyService';
 import { CarbonPointsService } from '../services/CarbonPointsService';
 import { DiaryStorageService } from '../services/DiaryStorageService';
 
@@ -63,6 +65,8 @@ struct Index {
   @State private takingFootprintGame: boolean = false;
   /** 是否正在进行华为运动绑定；绑定页不创建低碳记录。 */
   @State private bindingHealth: boolean = false;
+  /** 是否打开家庭碳账户页；从"我的"菜单进入，返回后回到"我的"栏目。 */
+  @State private showingFamily: boolean = false;
   /** 本次会话是否已经完成华为运动授权，以及读取到的今日步数。 */
   @State private healthBound: boolean = false;
   @State private healthStepsToday: number = 0;
@@ -74,12 +78,28 @@ struct Index {
   private pointsService: CarbonPointsService = new CarbonPointsService();
   /** 本地记录服务：页面重启后仍恢复同一批记录。 */
   private diaryStorage: DiaryStorageService = new DiaryStorageService();
+  /** 本地家庭碳账户服务：冷启动恢复当前记录身份。 */
+  private familyService: FamilyService = new FamilyService();
 
   /** 组件即将出现：从本地存储恢复上次会话保存的日记记录。 */
   aboutToAppear(): void {
     this.loadSavedDrafts();
     if (!this.previewMode) {
       this.restoreLoginSession();
+      this.initFamilySession();
+    }
+  }
+
+  /** 冷启动恢复家庭会话：把当前记录身份同步到 AppStorage，记录页据此归属成员与显示开关。 */
+  private async initFamilySession(): Promise<void> {
+    try {
+      const context: common.Context = this.getUIContext().getHostContext() as common.Context;
+      const family: FamilySnapshot | undefined = await this.familyService.load(context);
+      if (family !== undefined) {
+        FamilyService.applyCurrentMember(family);
+      }
+    } catch (error) {
+      // 没有家庭或读取失败时保持未创建状态，不影响正常记录。
     }
   }
 
@@ -147,7 +167,7 @@ struct Index {
     });
   }
 
-  /** 保存成功后为核验记录入账，去重和每日上限由服务层统一执行。 */
+  /** 保存成功后为记录入账：核验记录走全额、手动记录走折扣通道，去重与上限由服务层统一执行。 */
   private async rewardSavedRecord(draft: RecordDraft): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
@@ -156,8 +176,16 @@ struct Index {
           draft.reductionKg, draft.riskFlags ?? []);
         return;
       }
-      await this.pointsService.rewardVerifiedRecord(context, draft.operationId ?? '',
-        draft.verificationStatus === 'verified', draft.scoreEnabled, draft.evidenceSource, draft.reductionKg);
+      if (draft.verificationStatus === 'verified' && draft.scoreEnabled) {
+        await this.pointsService.rewardVerifiedRecord(context, draft.operationId ?? '',
+          true, true, draft.evidenceSource, draft.reductionKg);
+        return;
+      }
+      // 手动记录（光盘行动、节水节电等无法系统核验）：按折扣积分入账；
+      // 携带风险标记（如重复图片被拒）的记录不发放任何积分。
+      if ((draft.riskFlags ?? []).length === 0) {
+        await this.pointsService.rewardManualRecord(context, draft.operationId ?? '', draft.reductionKg);
+      }
     } catch (error) {
       // 积分入账失败不阻断日记保存。
     }
@@ -279,6 +307,15 @@ struct Index {
             this.activeTab = '我的';
           }
         })
+      } else if (this.showingFamily) {
+        // 家庭碳账户：从"我的"菜单进入的整页子视图，返回后回到"我的"栏目
+        FamilyPage({
+          savedDrafts: this.savedDrafts,
+          onBack: () => {
+            this.showingFamily = false;
+            this.activeTab = '我的';
+          }
+        })
       } else if (this.takingQuiz) {
         QuizPage({
           onBack: () => {
@@ -326,6 +363,9 @@ struct Index {
           onStartFootprintGame: () => {
             this.activeTab = '我的';
             this.takingFootprintGame = true;
+          },
+          onStartFamily: () => {
+            this.showingFamily = true;
           },
           onNavigate: (tab: string) => {
             if (tab === '我的') {

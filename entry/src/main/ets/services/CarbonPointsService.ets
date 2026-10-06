@@ -22,6 +22,8 @@ export interface PointsSnapshot {
   rewardedOperationIds: string[];
   /** 已兑换的模拟权益 id 列表 */
   redeemedRewardIds: string[];
+  /** 与 redeemedRewardIds 一一对应的兑换日期（yyyy-MM-dd），用于荣誉墙展示 */
+  redeemedRewardDates?: string[];
   /** 核验记录计分所属日期（yyyy-MM-dd），跨天自动重置 */
   recordDay: string;
   /** 当日核验记录已入账积分，配合每日上限使用 */
@@ -30,6 +32,10 @@ export interface PointsSnapshot {
   aiRecordDay?: string;
   /** 当日图片辅助认证已入账积分，配合独立每日上限使用 */
   aiRecordDayPoints?: number;
+  /** 手动记录（无法系统核验）计分所属日期，跨天自动重置 */
+  manualRecordDay?: string;
+  /** 当日手动记录已入账积分，配合折扣每日上限使用 */
+  manualRecordDayPoints?: number;
   /** 已获得图片辅助认证积分的图片摘要。 */
   aiRewardedImageHashes?: string[];
   /** 最近一次答题结算日期；每天只能结算一次答题积分。 */
@@ -78,8 +84,8 @@ export interface PointsReward {
 
 /** 权益兑换唯一目录：页面展示与服务层价格校验共用同一份，避免两处维护后不一致 */
 export const POINTS_REWARDS: PointsReward[] = [
-  { id: 'green-badge', title: '校园绿能徽章', description: '虚拟徽章，兑换后展示在碳记权益记录中', cost: 30 },
-  { id: 'tree-certificate', title: '虚拟植树证书', description: '模拟生成一张低碳行动纪念证书', cost: 80 },
+  { id: 'green-badge', title: '校园绿能徽章', description: '虚拟低碳徽章，兑换后点亮在“我的低碳荣誉”中', cost: 30 },
+  { id: 'tree-certificate', title: '虚拟植树证书', description: '生成专属编号的植树纪念证书，展示在荣誉中', cost: 80 },
   { id: 'travel-coupon', title: '低碳出行优惠券', description: '模拟权益码：GREEN-TRAVEL-2026', cost: 120 }
 ];
 
@@ -109,10 +115,13 @@ const EMPTY_POINTS: PointsSnapshot = {
   claimedTaskKeys: [],
   rewardedOperationIds: [],
   redeemedRewardIds: [],
+  redeemedRewardDates: [],
   recordDay: '',
   recordDayPoints: 0,
   aiRecordDay: '',
   aiRecordDayPoints: 0,
+  manualRecordDay: '',
+  manualRecordDayPoints: 0,
   aiRewardedImageHashes: [],
   quizDay: '',
   quizDayPoints: 0,
@@ -130,6 +139,10 @@ export class CarbonPointsService {
   private static readonly DAILY_RECORD_LIMIT: number = 30;
   /** 图片辅助认证每日积分上限，不与系统核验上限混用。 */
   private static readonly DAILY_AI_RECORD_LIMIT: number = 10;
+  /** 手动记录（无法系统核验）每日积分上限：鼓励记录但防止无凭证刷分。 */
+  private static readonly DAILY_MANUAL_RECORD_LIMIT: number = 5;
+  /** 手动记录积分折算比例：按系统核验积分的 15% 入账。 */
+  private static readonly MANUAL_POINTS_RATE: number = 0.15;
   /** 单位减排量对应积分；积分只对系统核验的减排量开放。 */
   private static readonly POINTS_PER_KG: number = 20;
   /** 单条核验记录积分下限，避免小额记录被四舍五入清零。 */
@@ -167,10 +180,14 @@ export class CarbonPointsService {
       claimedTaskKeys: Array.isArray(value.claimedTaskKeys) ? value.claimedTaskKeys : [],
       rewardedOperationIds: Array.isArray(value.rewardedOperationIds) ? value.rewardedOperationIds : [],
       redeemedRewardIds: Array.isArray(value.redeemedRewardIds) ? value.redeemedRewardIds : [],
+      redeemedRewardDates: Array.isArray(value.redeemedRewardDates)
+        ? value.redeemedRewardDates.filter((item: string): boolean => item.length > 0) : [],
       recordDay: typeof value.recordDay === 'string' ? value.recordDay : '',
       recordDayPoints: Math.max(0, Number(value.recordDayPoints) || 0),
       aiRecordDay: typeof value.aiRecordDay === 'string' ? value.aiRecordDay : '',
       aiRecordDayPoints: Math.max(0, Number(value.aiRecordDayPoints) || 0),
+      manualRecordDay: typeof value.manualRecordDay === 'string' ? value.manualRecordDay : '',
+      manualRecordDayPoints: Math.max(0, Number(value.manualRecordDayPoints) || 0),
       aiRewardedImageHashes: Array.isArray(value.aiRewardedImageHashes)
         ? value.aiRewardedImageHashes.filter((item: string): boolean => item.length > 0) : [],
       quizDay: typeof value.quizDay === 'string' ? value.quizDay : '',
@@ -372,6 +389,49 @@ export class CarbonPointsService {
   }
 
   /**
+   * 手动记录折扣积分：光盘行动、节水节电等无法系统核验的行为按系统积分的 15% 入账。
+   * 手动记录不修改 verificationStatus/scoreEnabled，不影响正式碳足迹统计，只走积分激励通道；
+   * 同一 operationId 只入账一次，每天最多 5 分，防止无凭证重复记录刷分。
+   * @param context 应用上下文
+   * @param operationId 本地记录操作号，入账去重依据
+   * @param reductionKg 本条记录的减排量（kg CO₂e），按系统口径折算后乘以折扣比例
+   * @returns 统一操作结果（是否成功、本次积分、最新余额与提示文案）
+   */
+  async rewardManualRecord(context: common.Context, operationId: string,
+    reductionKg: number): Promise<PointsActionResult> {
+    const snapshot: PointsSnapshot = await this.load(context);
+    if (operationId.length === 0) {
+      return this.result(false, 0, snapshot.balance, '记录信息不完整');
+    }
+    if (snapshot.rewardedOperationIds.includes(operationId)) {
+      return this.result(false, 0, snapshot.balance, '这条记录已经领取过积分');
+    }
+    const today: string = this.today();
+    if (snapshot.manualRecordDay !== today) {
+      snapshot.manualRecordDay = today;
+      snapshot.manualRecordDayPoints = 0;
+    }
+    // 与系统核验同口径计算基准积分，再按折扣比例向下取整，保证手动积分永远低于核验积分。
+    const systemPoints: number = Math.max(CarbonPointsService.MIN_RECORD_POINTS,
+      Math.min(CarbonPointsService.MAX_RECORD_POINTS,
+        Math.round(Math.max(0, reductionKg) * CarbonPointsService.POINTS_PER_KG)));
+    const calculated: number =
+      Math.max(1, Math.floor(systemPoints * CarbonPointsService.MANUAL_POINTS_RATE));
+    const points: number = Math.min(calculated,
+      CarbonPointsService.DAILY_MANUAL_RECORD_LIMIT - (snapshot.manualRecordDayPoints ?? 0));
+    snapshot.rewardedOperationIds = [...snapshot.rewardedOperationIds, operationId];
+    if (points <= 0) {
+      await this.save(context, snapshot);
+      return this.result(false, 0, snapshot.balance, '今日手动记录积分已达上限');
+    }
+    snapshot.manualRecordDayPoints = (snapshot.manualRecordDayPoints ?? 0) + points;
+    snapshot.balance += points;
+    snapshot.totalEarned += points;
+    await this.save(context, snapshot);
+    return this.result(true, points, snapshot.balance, `手动记录按 ${Math.round(CarbonPointsService.MANUAL_POINTS_RATE * 100)}% 折算，获得 ${points} 积分`);
+  }
+
+  /**
    * 每日答题积分：完成一套 10 题后只结算一次，最高 4 分。
    * 答题主要承担知识激励，积分低于低碳行为核验积分，避免刷题替代真实行动。
    * @param context 应用上下文
@@ -483,6 +543,8 @@ export class CarbonPointsService {
     snapshot.balance -= reward.cost;
     snapshot.totalRedeemed += reward.cost;
     snapshot.redeemedRewardIds = [...snapshot.redeemedRewardIds, reward.id];
+    // 记录兑换日期，供荣誉墙展示徽章获得时间与证书落款
+    snapshot.redeemedRewardDates = [...(snapshot.redeemedRewardDates ?? []), this.today()];
     await this.save(context, snapshot);
     return this.result(true, reward.cost, snapshot.balance, '兑换成功（模拟权益已到账）');
   }

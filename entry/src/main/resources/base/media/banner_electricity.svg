@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360">
+  <rect width="800" height="360" fill="#EDF4EA"/>
+  <rect x="90" y="40" width="620" height="280" rx="20" fill="#FFFFFF"/>
+  <circle cx="400" cy="150" r="88" fill="#FFF8E6" stroke="#D4A24C" stroke-width="9"/>
+  <path d="M368 128 C 362 108, 384 92, 400 104 C 416 92, 438 108, 432 128 C 440 146, 420 160, 400 152 C 380 160, 360 146, 368 128 Z"
+        fill="#4C9576"/>
+  <line x1="400" y1="152" x2="400" y2="196" stroke="#4C9576" stroke-width="7" stroke-linecap="round"/>
+  <rect x="374" y="238" width="52" height="18" rx="8" fill="#D4A24C"/>
+  <rect x="384" y="222" width="32" height="14" rx="6" fill="#C89244"/>
+  <line x1="320" y1="118" x2="292" y2="104" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <line x1="312" y1="152" x2="280" y2="148" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <line x1="326" y1="184" x2="300" y2="200" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <line x1="480" y1="118" x2="508" y2="104" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <line x1="488" y1="152" x2="520" y2="148" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <line x1="474" y1="184" x2="500" y2="200" stroke="#D4A24C" stroke-width="6" stroke-linecap="round"/>
+  <rect x="120" y="120" width="84" height="120" rx="14" fill="#FFFFFF" stroke="#174E3A" stroke-width="6"/>
+  <line x1="162" y1="128" x2="162" y2="164" stroke="#174E3A" stroke-width="6" stroke-linecap="round"/>
+  <path d="M162 164 L 162 152 L 178 160 L 162 168 Z" fill="#4C9576" stroke="#4C9576" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="138" cy="214" r="6" fill="#D4A24C"/>
+  <circle cx="186" cy="214" r="6" fill="#9DBBA6"/>
+  <line x1="596" y1="128" x2="648" y2="128" stroke="#9DBBA6" stroke-width="6" stroke-linecap="round"/>
+  <line x1="596" y1="152" x2="664" y2="152" stroke="#9DBBA6" stroke-width="6" stroke-linecap="round"/>
+  <line x1="596" y1="176" x2="636" y2="176" stroke="#9DBBA6" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="628" cy="220" r="26" fill="none" stroke="#4C9576" stroke-width="6"/>
+  <circle cx="628" cy="220" r="8" fill="#4C9576"/>
+</svg>

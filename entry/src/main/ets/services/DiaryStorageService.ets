@@ -85,7 +85,10 @@ export class DiaryStorageService {
       aiRecognizedAt: Number(value.aiRecognizedAt) || 0,
       imageHash: typeof value.imageHash === 'string' ? value.imageHash : '',
       riskFlags: Array.isArray(value.riskFlags)
-        ? value.riskFlags.filter((item: string): boolean => item.length > 0) : []
+        ? value.riskFlags.filter((item: string): boolean => item.length > 0) : [],
+      // 家庭归属字段透传：memberId 缺失按空串（家庭统计时归管理员），familyVisible 默认可见
+      memberId: typeof value.memberId === 'string' ? value.memberId : '',
+      familyVisible: value.familyVisible !== false
     };
   }
 

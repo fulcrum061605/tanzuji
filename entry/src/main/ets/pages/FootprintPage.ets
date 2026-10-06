@@ -574,7 +574,7 @@ export struct FootprintPage {
   private LineChart() {
     Column({ space: 12 }) {
       Row() {
-        Text('减排趋势（折线图）')
+        Text('减排趋势')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor('#173F2E')
@@ -692,7 +692,7 @@ export struct FootprintPage {
   private PieChart() {
     Column({ space: 14 }) {
       Row() {
-        Text('减排行为占比（饼图）')
+        Text('减排行为占比')
           .fontSize(18)
           .fontWeight(FontWeight.Bold)
           .fontColor('#173F2E')

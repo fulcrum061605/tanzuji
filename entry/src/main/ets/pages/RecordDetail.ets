@@ -76,6 +76,10 @@ export interface RecordDraft {
   /** 图片摘要和风险标记，用于本机重复拦截和答辩追溯。 */
   imageHash?: string;
   riskFlags?: string[];
+  /** 记录归属的家庭成员 id；未创建家庭时为空，历史记录读取时归管理员。 */
+  memberId?: string;
+  /** 是否计入家庭统计；关闭后仅自己可见，不参与家庭减排数据。 */
+  familyVisible?: boolean;
 }
 
 /**
@@ -154,6 +158,12 @@ export struct RecordDetail {
   @State private aiRecognizedAt: number = 0;
   @State private imageHash: string = '';
   @State private riskFlags: string[] = [];
+  /** 当前家庭记录身份昵称：非空时显示"同步到家庭"开关；由入口页启动时同步到 AppStorage */
+  @State private familyMemberName: string = '';
+  /** 是否把本次记录计入家庭统计（仅自己可见开关） */
+  @State private syncToFamily: boolean = true;
+  /** 当前家庭记录身份 id：保存时归属该成员；未创建家庭时为空 */
+  private familyMemberId: string = '';
   /** 证据服务实例：负责定位轨迹测量与华为运动数据读取 */
   private evidenceService: CarbonEvidenceService = new CarbonEvidenceService();
   /** 碳因子服务：统一提供减排系数、计算与口径来源 */
@@ -173,6 +183,9 @@ export struct RecordDetail {
 
   /** 组件即将出现：编辑已有记录时回填原草稿；新建记录时按行为初始化默认值与提示文案 */
   aboutToAppear(): void {
+    // 家庭记录身份：入口页冷启动或家庭页切换身份后写入 AppStorage，这里读取一次供开关展示与保存归属
+    this.familyMemberId = AppStorage.get<string>('familyCurrentMemberId') ?? '';
+    this.familyMemberName = AppStorage.get<string>('familyCurrentMemberName') ?? '';
     // 编辑模式：回填原草稿的全部字段
     if (this.initialDraft !== undefined) {
       this.amountText = this.initialDraft.amount.toString();
@@ -193,6 +206,8 @@ export struct RecordDetail {
       this.aiRecognizedAt = this.initialDraft.aiRecognizedAt ?? 0;
       this.imageHash = this.initialDraft.imageHash ?? '';
       this.riskFlags = this.initialDraft.riskFlags ?? [];
+      // 家庭可见开关：老记录未保存过该字段时按默认可见回填
+      this.syncToFamily = this.initialDraft.familyVisible !== false;
       this.measurementMessage = this.initialDraft.verificationStatus === 'verified'
         ? '已由系统测量，数量不可手动修改' : '待核实记录，不计入正式碳积分';
       return;
@@ -380,7 +395,11 @@ export struct RecordDetail {
       aiRecognizedUnit: this.aiRecognizedUnit,
       aiRecognizedAt: this.aiRecognizedAt,
       imageHash: this.imageHash,
-      riskFlags: this.riskFlags
+      riskFlags: this.riskFlags,
+      // 家庭归属：家庭有效时按当前记录身份归属，可见性跟随开关；
+      // 未创建家庭时保留原记录的家庭字段，避免编辑旧记录时意外抹掉归属
+      memberId: this.familyMemberId.length > 0 ? this.familyMemberId : this.initialDraft?.memberId,
+      familyVisible: this.familyMemberId.length > 0 ? this.syncToFamily : this.initialDraft?.familyVisible
     });
   }
 
@@ -743,6 +762,56 @@ export struct RecordDetail {
   }
 
   /**
+   * 家庭同步开关行：仅在已创建家庭时出现
+   * 左侧人物图标 + 说明文案，右侧开关控制记录是否计入家庭统计；
+   * 关闭后该记录仅自己可见，家庭看板、任务与周报都不再统计它
+   */
+  @Builder
+  private FamilySyncRow() {
+    if (this.familyMemberName.length > 0) {
+      Row({ space: 10 }) {
+        // Stack 叠加：圆形浅绿底托 + 人物图标
+        Stack({ alignContent: Alignment.Center }) {
+          Row()
+            .width(38)
+            .height(38)
+            .borderRadius(19)
+            .backgroundColor('#E4F1E6')
+          Image($r('app.media.diary_person'))
+            .syncLoad(true)
+            .width(25)
+            .height(25)
+        }
+        // 中部：标题与身份说明，占据剩余宽度
+        Column({ space: 2 }) {
+          Text('同步到家庭碳账户')
+            .fontSize(15)
+            .fontWeight(FontWeight.Medium)
+            .fontColor('#126046')
+          Text(this.syncToFamily
+            ? `以「${this.familyMemberName}」的身份计入家庭减排`
+            : '已关闭，本条记录仅自己可见')
+            .fontSize(11)
+            .fontColor(this.syncToFamily ? '#718078' : '#B08858')
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+        // 右侧：家庭可见开关
+        Toggle({ type: ToggleType.Switch, isOn: this.syncToFamily })
+          .selectedColor('#4C9576')
+          .onChange((isOn: boolean) => {
+            this.syncToFamily = isOn;
+          })
+      }
+      // 与减排估算卡片一致的浅绿底色提示行
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+      .backgroundColor('#F0F8EE')
+      .borderRadius(14)
+    }
+  }
+
+  /**
    * 证据采集控制区
    * 需要系统测量的行为（骑行/步行）：显示测量提示文案 + 开始/结束测量按钮，
     * 步行额外提供"读取今日步数"入口（华为运动优先，未开通时自动降级本机计步）；手动行为只显示记录方式提示
@@ -965,6 +1034,8 @@ export struct RecordDetail {
           .backgroundColor('#FAFBF6')
           .border({ width: 1, color: '#DDE8DE' })
           .borderRadius(14)
+          // 家庭归属开关：已创建家庭时显示，控制本条记录是否计入家庭统计
+          this.FamilySyncRow()
           this.NoteCard()
         }
         .width('100%')
