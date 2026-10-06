@@ -285,13 +285,13 @@ export class CarbonPointsService {
    * @param operationId 本地记录操作号，入账去重依据
    * @param verified 记录是否已通过系统核验
    * @param scoreEnabled 记录是否允许计入积分
-   * @param evidenceSource 数量证据来源；manual 来源一律拦截
+   * @param evidenceSource 数量证据来源；manual 来源一律拦截（health/sensor 为运动步数来源）
    * @param reductionKg 本条记录的减排量（kg CO₂e），按 20 分/kg 折算并夹取单条上下限
    * @returns 统一操作结果（是否成功、本次积分、最新余额与提示文案）
    */
   async rewardVerifiedRecord(context: common.Context, operationId: string,
     verified: boolean, scoreEnabled: boolean,
-    evidenceSource: 'location' | 'health' | 'ai_image' | 'manual' = 'manual', reductionKg: number = 0): Promise<PointsActionResult> {
+    evidenceSource: 'location' | 'health' | 'sensor' | 'ai_image' | 'manual' = 'manual', reductionKg: number = 0): Promise<PointsActionResult> {
     const snapshot: PointsSnapshot = await this.load(context);
     // 只有系统定位或华为运动产生的证据可以入账；手动输入即使被调用方误标为
     // verified，也必须在服务层拦截，避免通过重复编辑或改写页面状态刷分。

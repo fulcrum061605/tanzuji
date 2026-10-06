@@ -1,6 +1,6 @@
 /**
- * 华为运动绑定页。
- * 只负责申请官方运动/健康数据授权并读取今日步数，不创建低碳记录。
+ * 运动计步绑定页。
+ * 只负责申请运动权限并读取今日步数（华为运动优先，未开通时自动降级本机计步），不创建低碳记录。
  */
 import { common } from '@kit.AbilityKit';
 import { CarbonEvidenceService, EvidenceResult } from '../services/CarbonEvidenceService';
@@ -20,19 +20,20 @@ export struct HealthBindingPage {
       return;
     }
     this.reading = true;
-    this.message = '正在请求华为运动授权…';
+    this.message = '正在读取今日步数…';
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
-      const result: EvidenceResult = await this.evidenceService.readHuaweiActivity(context);
-      if (result.source === 'health' && result.verified && result.amount > 0) {
+      const result: EvidenceResult = await this.evidenceService.readTodaySteps(context);
+      // 华为运动或本机计步任一来源读取成功即视为绑定完成；本机计步首次读取只建立基数
+      if (result.source === 'health' || result.source === 'sensor') {
         this.steps = Math.round(result.amount);
-        this.message = '已读取今日步数，可返回“我的”查看';
+        this.message = `${result.message}，可返回“我的”查看`;
         this.onBound?.(this.steps);
       } else {
         this.message = result.message;
       }
     } catch (error) {
-      this.message = '华为运动暂时无法读取，请稍后重试';
+      this.message = '今日步数暂时无法读取，请稍后重试';
     } finally {
       this.reading = false;
     }
@@ -68,7 +69,7 @@ export struct HealthBindingPage {
             .fontSize(25)
             .fontWeight(FontWeight.Bold)
             .fontColor('#123F2E')
-          Text('碳记通过华为官方健康服务读取数据，不接受手动修改。')
+          Text('优先读取华为运动健康数据，未开通时自动使用本机计步传感器，均不接受手动修改。')
             .fontSize(14)
             .fontColor('#718078')
             .lineHeight(22)

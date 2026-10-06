@@ -4,7 +4,7 @@
  * 因此在成长页收藏的文章会立即出现在“我的收藏”中，并支持离线打开。
  * 页面内部按状态标志切换五种视图：个人主页 / 我的收藏列表 / 文章详情 / 积分与权益中心 / 数据管理。
  * 积分（签到、任务、核验入账、权益兑换）经 CarbonPointsService 持久化到 Preferences；备份、恢复与 CSV 报表经 BackupService 完成。
- * 华为运动步数只统计 evidenceSource=health 且核验通过的记录，按统一步幅折算，不可手动刷写。
+ * 步数只统计 evidenceSource=health/sensor 且核验通过的记录，按统一步幅折算，不可手动刷写。
  */
 // common.Context：各服务读写 Preferences 所需的应用上下文
 import { common } from '@kit.AbilityKit';
@@ -182,13 +182,15 @@ export struct MyPage {
     return `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
   }
 
-  /** 已绑定华为运动且读到今日步数时返回今日步数；否则将已核验公里数按统一步幅折算为累计步数。 */
+  /** 已绑定运动计步且读到今日步数时返回今日步数；否则将已核验公里数（华为运动/本机计步）按统一步幅折算为累计步数。 */
   private healthSteps(): number {
     if (this.healthBound && this.healthStepsToday > 0) {
       return this.healthStepsToday;
     }
     const kilometers: number = this.savedDrafts
-      .filter((draft: RecordDraft): boolean => draft.evidenceSource === 'health' && draft.verificationStatus === 'verified')
+      .filter((draft: RecordDraft): boolean =>
+        (draft.evidenceSource === 'health' || draft.evidenceSource === 'sensor') &&
+        draft.verificationStatus === 'verified')
       .reduce((sum: number, draft: RecordDraft): number => sum + Math.max(0, draft.amount), 0);
     return Math.round(kilometers / STEP_TO_KM);
   }

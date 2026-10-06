@@ -38,7 +38,7 @@ class PreviewDiaryDraft implements RecordDraft {
   note: string = '今天骑行去了图书馆，路上的风很舒服。比起开车，骑行让我更慢地观察校园，也让我发现低碳生活其实可以很自然。\n\n在图书馆待了两个多小时，读完了一本一直想看的书。安静的环境让我更专注，也感受到知识带来的踏实。\n\n回来的路上，夕阳透过树叶洒在路面上，整条路都显得很温柔。这样的出行方式，不仅让自己心情更好，也让城市多了一点清新的空气。';
   hasPhoto: boolean = true;
   // 预览数据不能伪装成系统核验记录，避免答辩时把演示数据误认为真实证据。
-  evidenceSource: 'location' | 'health' | 'manual' = 'manual';
+  evidenceSource: 'location' | 'health' | 'sensor' | 'ai_image' | 'manual' = 'manual';
   verificationStatus: 'verified' | 'pending' = 'pending';
   evidenceId: string = 'preview-only';
   scoreEnabled: boolean = false;
@@ -130,7 +130,13 @@ export struct DiaryDetail {
       return this.draft.aiStatus === 'rejected' ? '图片认证未通过' : 'AI 辅助核验，按半额积分';
     }
     if (this.draft.verificationStatus === 'verified') {
-      return this.draft.evidenceSource === 'health' ? '华为运动已核验' : '系统轨迹已核验';
+      if (this.draft.evidenceSource === 'health') {
+        return '华为运动已核验';
+      }
+      if (this.draft.evidenceSource === 'sensor') {
+        return '本机计步已核验';
+      }
+      return '系统轨迹已核验';
     }
     return '待核实，不计入正式减排';
   }
@@ -147,6 +153,9 @@ export struct DiaryDetail {
     }
     if (this.draft.evidenceSource === 'health') {
       return '数量来源：华为运动授权数据（步数换算，估算）';
+    }
+    if (this.draft.evidenceSource === 'sensor') {
+      return '数量来源：本机计步传感器（步数换算，估算）';
     }
     if (this.draft.evidenceSource === 'location') {
       return '数量来源：系统定位轨迹（已过滤异常点）';

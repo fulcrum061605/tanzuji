@@ -8,7 +8,8 @@
  * 图片/SVG 全部在 resources/base/media 中，断网也可预览；文末提供独立 @Preview 预览入口。
  *
  * 核验与积分口径（与 CarbonEvidenceService / CarbonPointsService 约定一致）：
- * - location：系统定位轨迹测量；health：华为运动健康当日步数（按 STEP_TO_KM = 0.0007 公里/步换算）；
+ * - location：系统定位轨迹测量；health：华为运动健康当日步数；sensor：本机计步传感器当日步数
+ *   （两者均按 STEP_TO_KM = 0.0007 公里/步换算，华为运动未开通时自动降级本机计步）；
  * - ai_image：端侧 Core Vision Kit OCR 识别，用户保存确认后按 verified 入账，积分按系统核验积分折半；
  * - manual：手动记录，一律 pending 待核实，scoreEnabled 为 false，不计入正式碳积分。
  */
@@ -162,7 +163,7 @@ export struct RecordDetail {
 
   /**
    * 判断当前行为是否需要系统自动测量
-   * 所有出行距离行为不接受手动输入数量，只能通过定位轨迹或华为运动获得
+    * 所有出行距离行为不接受手动输入数量，只能通过定位轨迹或运动步数（华为运动/本机计步）获得
    * @returns true 表示数量由系统测量
    */
   private isAutoMeasured(): boolean {
@@ -336,7 +337,8 @@ export struct RecordDetail {
     if (amount <= 0 || (this.isAutoMeasured() && !aiConfirmed &&
       !aiManualFallback &&
       (amount <= 0.05 || this.verificationStatus !== 'verified' ||
-        (this.evidenceSource !== 'location' && this.evidenceSource !== 'health')))) {
+        (this.evidenceSource !== 'location' && this.evidenceSource !== 'health' &&
+          this.evidenceSource !== 'sensor')))) {
       this.showSaveHint(amount);
       return;
     }
@@ -446,20 +448,20 @@ export struct RecordDetail {
   }
 
   /**
-   * 读取华为运动步数
+   * 读取今日步数（华为运动优先，未开通时自动降级本机计步）
    * 步数按因子目录统一口径（0.7 米/步）换算为公里；读取成功且步数大于 0 时核验通过，
    * 否则降级为手动待核实
    */
-  private async readHuaweiActivity(): Promise<void> {
+  private async readTodaySteps(): Promise<void> {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
-      const result = await this.evidenceService.readHuaweiActivity(context);
-      if (result.source === 'health' && result.amount > 0) {
-        // 华为运动返回步数，统一按因子目录的步幅口径换算为距离；口径固定保存，不由用户输入。
+      const result = await this.evidenceService.readTodaySteps(context);
+      if ((result.source === 'health' || result.source === 'sensor') && result.amount > 0) {
+        // 运动数据返回步数，统一按因子目录的步幅口径换算为距离；口径固定保存，不由用户输入。
         this.amountText = (result.amount * STEP_TO_KM).toFixed(3);
         this.selectedUnit = '公里';
         this.verificationStatus = 'verified';
-        this.evidenceSource = 'health';
+        this.evidenceSource = result.source;
         this.evidenceId = result.evidenceId;
       } else {
         // 无可用数据：降级为手动待核实
@@ -468,10 +470,10 @@ export struct RecordDetail {
       }
       this.measurementMessage = result.message;
     } catch (error) {
-      // 健康服务不可用：降级为手动待核实
+      // 运动数据不可用：降级为手动待核实
       this.verificationStatus = 'pending';
       this.evidenceSource = 'manual';
-      this.measurementMessage = '华为运动数据暂不可用，本次记录将标记为待核实';
+      this.measurementMessage = '运动步数暂不可用，本次记录将标记为待核实';
     }
   }
 
@@ -743,7 +745,7 @@ export struct RecordDetail {
   /**
    * 证据采集控制区
    * 需要系统测量的行为（骑行/步行）：显示测量提示文案 + 开始/结束测量按钮，
-   * 步行额外提供"读取华为运动"入口；手动行为只显示记录方式提示
+    * 步行额外提供"读取今日步数"入口（华为运动优先，未开通时自动降级本机计步）；手动行为只显示记录方式提示
    */
   @Builder
   private EvidenceControl() {
@@ -777,16 +779,16 @@ export struct RecordDetail {
               .borderRadius(18)
               .onClick(() => this.startMeasurement())
           }
-          // 步行额外提供华为运动步数读取入口
+          // 步行额外提供今日步数读取入口（华为运动优先，未开通时自动降级本机计步）
           if (this.behavior.id === 'walk') {
-            Button('读取华为运动', { type: ButtonType.Normal, stateEffect: false })
+            Button('读取今日步数', { type: ButtonType.Normal, stateEffect: false })
               .layoutWeight(1)
               .height(36)
               .fontSize(14)
               .fontColor('#4C9576')
               .backgroundColor('#EAF2E8')
               .borderRadius(18)
-              .onClick(() => this.readHuaweiActivity())
+              .onClick(() => this.readTodaySteps())
           }
         }
       }
