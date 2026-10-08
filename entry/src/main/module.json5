@@ -97,6 +97,25 @@
             "resource": "$profile:backup_config"
           }
         ],
+      },
+      {
+        // 桌面服务卡片扩展 Ability 名称
+        "name": "EntryFormAbility",
+        // 卡片生命周期实现文件路径
+        "srcEntry": "./ets/entryformability/EntryFormAbility.ets",
+        // 扩展类型：服务卡片（Form Kit）
+        "type": "form",
+        // 桌面服务卡片显示名称
+        "label": "$string:EntryFormAbility_label",
+        // 扩展描述
+        "description": "$string:EntryFormAbility_desc",
+        // 卡片框架元数据：指向 form_config.json 卡片配置
+        "metadata": [
+          {
+            "name": "ohos.extension.form",
+            "resource": "$profile:form_config"
+          }
+        ]
       }
     ]
   }

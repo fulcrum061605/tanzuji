@@ -789,7 +789,9 @@ export struct RecordDetail {
             .fontWeight(FontWeight.Medium)
             .fontColor('#126046')
           Text(this.syncToFamily
-            ? `以「${this.familyMemberName}」的身份计入家庭减排`
+            ? (this.isAutoMeasured() || (this.evidenceSource === 'ai_image' && this.aiStatus === 'confirmed')
+              ? `以「${this.familyMemberName}」的身份计入家庭减排`
+              : `以「${this.familyMemberName}」的身份计入家庭减排，完成图片认证后生效`)
             : '已关闭，本条记录仅自己可见')
             .fontSize(11)
             .fontColor(this.syncToFamily ? '#718078' : '#B08858')
@@ -838,7 +840,7 @@ export struct RecordDetail {
               .backgroundColor('#4C9576')
               .borderRadius(18)
               .onClick(() => this.stopMeasurement())
-          } else {
+          } else if (this.behavior.id !== 'walk') {
             Button('申请权限并测量', { type: ButtonType.Normal, stateEffect: false })
               .layoutWeight(1)
               .height(36)
@@ -851,7 +853,7 @@ export struct RecordDetail {
           // 步行额外提供今日步数读取入口（华为运动优先，未开通时自动降级本机计步）
           if (this.behavior.id === 'walk') {
             Button('读取今日步数', { type: ButtonType.Normal, stateEffect: false })
-              .layoutWeight(1)
+              .width('100%')
               .height(36)
               .fontSize(14)
               .fontColor('#4C9576')

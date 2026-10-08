@@ -166,7 +166,8 @@ export struct DiaryDetail {
   /** 将日记正文区域截图为 JPEG，返回可被系统分享面板读取的应用文件 URI。 */
   private async createShareImage(context: common.UIAbilityContext): Promise<string> {
     const pixelMap = await this.getUIContext().getComponentSnapshot().get('diary-share-root');
-    const imagePath: string = `${context.cacheDir}/tanji-diary-${Date.now()}.jpg`;
+    // 固定文件名复写同一张缓存图，避免每次分享都在 cacheDir 里堆积新文件
+    const imagePath: string = `${context.cacheDir}/tanji-diary-card.jpg`;
     const file = await fileIo.open(imagePath, fileIo.OpenMode.WRITE_ONLY |
       fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
     try {

@@ -23,6 +23,30 @@
     {
       "name": "health_permission_reason",
       "value": "用于读取华为运动中的步数和运动时长，避免手动刷分"
+    },
+    {
+      "name": "EntryFormAbility_label",
+      "value": "碳记卡片"
+    },
+    {
+      "name": "EntryFormAbility_desc",
+      "value": "碳记桌面服务卡片，展示今日与近7天碳减排进度"
+    },
+    {
+      "name": "card_display_name",
+      "value": "碳记·今日减排"
+    },
+    {
+      "name": "card_desc",
+      "value": "展示今日与近7天碳减排进度，点击进入碳记"
+    },
+    {
+      "name": "quick_card_display_name",
+      "value": "碳记·记录今日"
+    },
+    {
+      "name": "quick_card_desc",
+      "value": "一键记录今日低碳行为，点击直达新建日记"
     }
   ]
 }

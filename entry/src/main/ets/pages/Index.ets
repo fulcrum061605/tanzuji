@@ -26,6 +26,7 @@ import { FamilyPage } from './FamilyPage';
 import { FamilyService, FamilySnapshot } from '../services/FamilyService';
 import { CarbonPointsService } from '../services/CarbonPointsService';
 import { DiaryStorageService } from '../services/DiaryStorageService';
+import { CardService } from '../services/CardService';
 
 /**
  * 入口组件
@@ -112,6 +113,8 @@ struct Index {
         AppStorage.setOrCreate<string>('loginUserId', user.userId);
         AppStorage.setOrCreate<string>('loginDisplayName', user.displayName);
         this.loggedIn = true;
+        // 会话恢复完成后才允许消费快捷添加意图，避免意图早于登录状态丢失
+        this.consumeQuickAddFlag();
       }
     } catch (error) {
       // 无会话时保留登录页，不影响本地记录读取。
@@ -124,6 +127,27 @@ struct Index {
       return;
     }
     this.activeTab = tab;
+  }
+
+  /** 页面重新可见（含从桌面卡片暖启动拉回前台）：消费快捷添加意图，直达行为选择页。 */
+  onPageShow(): void {
+    this.consumeQuickAddFlag();
+  }
+
+  /**
+   * 消费桌面"记录今日"卡片写入的快捷添加意图
+   * 仅登录后生效：切到日记栏目并打开行为选择页；意图一次性消费，避免重复弹出
+   */
+  private consumeQuickAddFlag(): void {
+    const pending: boolean = AppStorage.get<boolean>('pendingQuickAdd') ?? false;
+    if (!pending || !this.loggedIn) {
+      return;
+    }
+    AppStorage.setOrCreate<boolean>('pendingQuickAdd', false);
+    this.activeTab = '日记';
+    this.viewingDiary = false;
+    this.editingRecord = false;
+    this.pickingBehavior = true;
   }
 
   /**
@@ -473,6 +497,8 @@ struct Index {
             AppStorage.setOrCreate<string>('loginUserId', userId);
           }
           this.loggedIn = true;
+          // 桌面卡片在未登录时拉起：登录完成后补消费快捷添加意图
+          this.consumeQuickAddFlag();
         }
       })
     }
@@ -487,6 +513,8 @@ struct Index {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       this.savedDrafts = await this.diaryStorage.upsert(context, draft);
+      // 保存成功后异步刷新桌面服务卡片；刷新失败由 CardService 内部消化，不阻塞保存
+      CardService.refreshAll(context);
     } catch (error) {
       // 页面内存状态仍可继续使用，下一次保存会再次尝试落盘。
     }
@@ -504,6 +532,8 @@ struct Index {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       this.savedDrafts = await this.diaryStorage.remove(context, recordId);
+      // 删除成功后同步刷新桌面服务卡片上的今日/近7天统计
+      CardService.refreshAll(context);
     } catch (error) {
       // 删除失败时由当前页内存列表完成即时移除，避免阻塞用户操作。
     }
@@ -518,6 +548,8 @@ struct Index {
     try {
       const context: common.Context = this.getUIContext().getHostContext() as common.Context;
       await this.diaryStorage.saveAll(context, records);
+      // 备份恢复会整体替换记录列表，桌面卡片统计需一并重建刷新
+      CardService.refreshAll(context);
     } catch (error) {
       // 恢复后的页面状态已经更新，落盘失败时保留当前会话数据并等待下次保存。
     }

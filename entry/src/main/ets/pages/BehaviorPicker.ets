@@ -149,12 +149,12 @@ export struct BehaviorPicker {
       // 返回按钮：透明背景，仅显示左箭头字符
       Button({ type: ButtonType.Normal }) {
         Text('‹')
-          .fontSize(42)
+          .fontSize(36)
           .fontColor('#174E3A')
           .fontWeight(FontWeight.Normal)
       }
-      .width(44)
-      .height(48)
+      .width(38)
+      .height(40)
       .padding(0)
       .backgroundColor(Color.Transparent)
       .accessibilityText('返回日记首页')
@@ -209,8 +209,8 @@ export struct BehaviorPicker {
     }
     // 顶部操作栏容器：通栏定高，左右留出对称内边距
     .width('100%')
-    .height(74)
-    .padding({ left: 18, right: 18 })
+    .height(58)
+    .padding({ left: 15, right: 15 })
   }
 
   /**

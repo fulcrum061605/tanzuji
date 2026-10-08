@@ -270,24 +270,6 @@ export struct KnowledgeCenter {
   }
 
   /**
-   * 按插图类型映射文章图标资源
-   * @param article 文章数据
-   * @returns 对应的图标资源，未知类型回落到幼苗图标
-   */
-  private articleIcon(article: KnowledgeArticle): Resource {
-    switch (article.illustration) {
-      case 'travel': return $r('app.media.diary_walk');
-      case 'electricity': return $r('app.media.diary_electricity');
-      case 'food': return $r('app.media.diary_meal');
-      case 'recycle': return $r('app.media.diary_recycle');
-      case 'campus': return $r('app.media.diary_sprout');
-      case 'policy': return $r('app.media.diary_diary');
-      case 'neutral': return $r('app.media.diary_leaf');
-      default: return $r('app.media.diary_sprout');
-    }
-  }
-
-  /**
    * 按插图类型映射文章详情配图资源
    * 配图随 HAP 内置（流程示意图/风景插画），断网同样可读；未知类型回落到树苗风景图。
    * @param article 文章数据
@@ -729,25 +711,16 @@ export struct KnowledgeCenter {
             .height(170)
             .borderRadius(14)
             .objectFit(ImageFit.Cover)
-          // 分类与阅读时长信息行
-          Row({ space: 14 }) {
-            Image(this.articleIcon(article))
-              .syncLoad(true)
-              .width(42)
-              .height(42)
-              .padding(6)
-              .backgroundColor('#EAF0E5')
-              .borderRadius(21)
-            Column({ space: 4 }) {
-              Text(article.category)
-                .fontSize(13)
-                .fontColor('#4C8067')
-              Text(article.readTime)
-                .fontSize(12)
-                .fontColor('#8A968F')
-            }
-            .alignItems(HorizontalAlign.Start)
+          // 分类与阅读时长信息行：纯文字呈现，不再放含义不明的分类图标
+          Column({ space: 4 }) {
+            Text(article.category)
+              .fontSize(13)
+              .fontColor('#4C8067')
+            Text(article.readTime)
+              .fontSize(12)
+              .fontColor('#8A968F')
           }
+          .alignItems(HorizontalAlign.Start)
           .width('100%')
 
           // 文章大标题

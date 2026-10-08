@@ -48,7 +48,8 @@ const APPROXIMATE_LOCATION_PERMISSION: Permissions = 'ohos.permission.APPROXIMAT
 /** 运动状态识别权限（步数统计依赖） */
 const MOTION_PERMISSION: Permissions = 'ohos.permission.ACTIVITY_MOTION';
 /** 本机计步日基准的 Preferences 存储库名 */
-const STEP_STORE_NAME: string = 'tanji_step_baseline_v1';
+// v2：跨日首次读取不再沿用旧累计值，避免旧版本基线把昨日步数带入今天。
+const STEP_STORE_NAME: string = 'tanji_step_baseline_v2';
 /** 本机计步日基准在存储库中的键名 */
 const STEP_RECORD_KEY: string = 'step_day_record';
 /** 计步传感器单次读取超时（毫秒）：防止服务异常导致界面停留在读取状态 */
@@ -422,7 +423,8 @@ export class CarbonEvidenceService {
             record = { date: today, lastCum: cumulative, todaySteps: Math.max(0, saved.todaySteps) + delta };
           } else {
             // 新的一天：以上次读取为基线，跨零点以来的增量计入今天
-            record = { date: today, lastCum: cumulative, todaySteps: delta };
+            // 跨日首次读取只建立当天基线，避免把前一天的开机累计步数算进今天。
+            record = { date: today, lastCum: cumulative, todaySteps: 0 };
           }
         }
       } catch (error) {

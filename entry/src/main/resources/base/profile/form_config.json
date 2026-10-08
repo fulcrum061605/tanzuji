@@ -1,0 +1,37 @@
+{
+  "forms": [
+    {
+      "name": "carbon_today",
+      "displayName": "$string:card_display_name",
+      "description": "$string:card_desc",
+      "src": "./ets/widget/pages/CarbonCard.ets",
+      "uiSyntax": "arkts",
+      "isDefault": true,
+      "updateEnabled": true,
+      "updateDuration": 2,
+      "defaultDimension": "2*2",
+      "supportDimensions": [
+        "2*2"
+      ],
+      "formConfigAbility": "ability://EntryAbility",
+      "isDynamic": true,
+      "metadata": []
+    },
+    {
+      "name": "quick_add",
+      "displayName": "$string:quick_card_display_name",
+      "description": "$string:quick_card_desc",
+      "src": "./ets/widget/pages/QuickAddCard.ets",
+      "uiSyntax": "arkts",
+      "isDefault": false,
+      "updateEnabled": false,
+      "defaultDimension": "1*2",
+      "supportDimensions": [
+        "1*2"
+      ],
+      "formConfigAbility": "ability://EntryAbility",
+      "isDynamic": true,
+      "metadata": []
+    }
+  ]
+}

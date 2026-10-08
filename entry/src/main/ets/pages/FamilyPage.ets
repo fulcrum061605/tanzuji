@@ -11,15 +11,17 @@ import { systemShare } from '@kit.ShareKit';
 import { image } from '@kit.ImageKit';
 import { fileIo, fileUri } from '@kit.CoreFileKit';
 import { RecordDraft } from './RecordDetail';
-import { FamilyService } from '../services/FamilyService';
-import { FamilySnapshot } from '../services/FamilyService';
-import { FamilyMember } from '../services/FamilyService';
-import { FamilyStats } from '../services/FamilyService';
-import { MemberContribution } from '../services/FamilyService';
-import { BehaviorBreakdown } from '../services/FamilyService';
-import { FamilyTaskProgress } from '../services/FamilyService';
-import { FamilyTaskDef } from '../services/FamilyService';
-import { FAMILY_TASK_LIBRARY } from '../services/FamilyService';
+import {
+  FamilyService,
+  FamilySnapshot,
+  FamilyMember,
+  FamilyStats,
+  MemberContribution,
+  BehaviorBreakdown,
+  FamilyTaskProgress,
+  FamilyTaskDef,
+  FAMILY_TASK_LIBRARY
+} from '../services/FamilyService';
 
 /**
  * 家庭碳账户组件
@@ -61,6 +63,12 @@ export struct FamilyPage {
   @State private renameText: string = '';
   /** 家庭服务：家庭数据与统计的唯一数据源 */
   private service: FamilyService = new FamilyService();
+  /** 统计结果缓存：家庭快照或记录列表变化前，一次渲染内的多处调用共用同一份结果 */
+  private statsCache: FamilyStats | undefined = undefined;
+  /** 统计缓存键：上次计算时的家庭快照引用 */
+  private statsFamilyRef: FamilySnapshot | undefined = undefined;
+  /** 统计缓存键：上次计算时的记录列表引用 */
+  private statsDraftsRef: RecordDraft[] | undefined = undefined;
   /** 页签名列表 */
   private readonly tabs: string[] = ['看板', '成员', '任务', '周报'];
   /** 创建表单的可选周目标 */
@@ -108,13 +116,21 @@ export struct FamilyPage {
   }
 
   /**
-   * 家庭统计结果：家庭页、任务与周报共用同一份口径
+   * 家庭统计结果：家庭页、任务与周报共用同一份口径。
+   * 一次渲染会多处读取统计（看板数字、贡献榜、任务与周报），
+   * 按 family 与 savedDrafts 的引用作缓存键，数据未变化时直接复用上次结果，
+   * 避免每次读取都对全部记录重算一遍。
    */
   private stats(): FamilyStats {
-    if (this.family === undefined) {
-      return FamilyService.emptyStats();
+    if (this.statsCache === undefined || this.statsFamilyRef !== this.family ||
+      this.statsDraftsRef !== this.savedDrafts) {
+      this.statsCache = this.family === undefined
+        ? FamilyService.emptyStats()
+        : FamilyService.computeStats(this.family, this.savedDrafts);
+      this.statsFamilyRef = this.family;
+      this.statsDraftsRef = this.savedDrafts;
     }
-    return FamilyService.computeStats(this.family, this.savedDrafts);
+    return this.statsCache;
   }
 
   /** 家庭名称；未创建时兜底为页面标题 */
@@ -327,7 +343,8 @@ export struct FamilyPage {
     const context: common.UIAbilityContext = this.getUIContext().getHostContext() as common.UIAbilityContext;
     try {
       const pixelMap = await this.getUIContext().getComponentSnapshot().get('family-report-root');
-      const imagePath: string = `${context.cacheDir}/tanji-family-${Date.now()}.jpg`;
+      // 固定文件名复写同一张缓存图，避免每次分享都在 cacheDir 里堆积新文件
+      const imagePath: string = `${context.cacheDir}/tanji-family-report.jpg`;
       const file = await fileIo.open(imagePath, fileIo.OpenMode.WRITE_ONLY |
         fileIo.OpenMode.CREATE | fileIo.OpenMode.TRUNC);
       try {
@@ -445,6 +462,7 @@ export struct FamilyPage {
           .fontColor(this.tab === tab ? '#FFFFFF' : '#64776D')
           .backgroundColor(this.tab === tab ? '#4C9576' : '#EAF2E8')
           .borderRadius(16)
+          .accessibilityText(this.tab === tab ? `${tab}，当前栏目` : tab)
           .onClick(() => {
             this.tab = tab;
           })
@@ -767,6 +785,11 @@ export struct FamilyPage {
         }
       }
       .width('100%')
+      .accessibilityText(
+        this.family !== undefined && member.memberId === this.family.currentMemberId
+          ? `${member.nickname}，当前身份`
+          : `切换到${member.nickname}`
+      )
       .onClick(() => {
         this.switchTo(member);
       })
@@ -774,6 +797,7 @@ export struct FamilyPage {
       if (this.renamingMemberId === member.memberId) {
         Row({ space: 8 }) {
           TextInput({ text: this.renameText, placeholder: '输入新昵称' })
+            .maxLength(12)
             .layoutWeight(1)
             .height(36)
             .fontSize(14)
@@ -892,6 +916,7 @@ export struct FamilyPage {
             .fontWeight(FontWeight.Medium)
             .fontColor('#365C4B')
           TextInput({ placeholder: '如：爸爸、妈妈、同学小林', text: this.newMemberName })
+            .maxLength(12)
             .width('100%')
             .height(40)
             .fontSize(14)
@@ -1362,6 +1387,7 @@ export struct FamilyPage {
               .fontColor('#365C4B')
               .width('100%')
             TextInput({ placeholder: '如：绿色小家', text: this.familyNameText })
+              .maxLength(12)
               .width('100%')
               .height(44)
               .fontSize(15)
@@ -1408,6 +1434,7 @@ export struct FamilyPage {
               .fontColor('#365C4B')
               .width('100%')
             TextInput({ placeholder: '如：小碳', text: this.ownerNameText })
+              .maxLength(12)
               .width('100%')
               .height(44)
               .fontSize(15)

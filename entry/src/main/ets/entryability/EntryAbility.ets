@@ -14,6 +14,8 @@ const DOMAIN = 0x0000;
 export default class EntryAbility extends UIAbility {
   /** Ability 创建回调：应用拉起时触发，可做全局初始化 */
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    // 解析桌面"记录今日"卡片带来的快捷添加意图
+    this.applyQuickAddWant(want);
     // 当前整套日记 UI 采用浅色纸张主题；必须在加载页面前设置，避免跟随深色系统产生白字。
     try {
       this.context.getApplicationContext().setColorMode(ConfigurationConstant.ColorMode.COLOR_MODE_LIGHT);
@@ -38,6 +40,23 @@ export default class EntryAbility extends UIAbility {
   /** Ability 销毁回调：可在此释放全局资源 */
   onDestroy(): void {
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onDestroy');
+  }
+
+  /** 应用已在后台存活时再次被拉起（如点击桌面卡片）：解析新的 want 参数 */
+  onNewWant(want: Want, launchParam: AbilityConstant.LaunchParam): void {
+    this.applyQuickAddWant(want);
+  }
+
+  /**
+   * 解析快捷添加意图：桌面"记录今日"卡片 router 拉起时携带 quickAdd 参数
+   * 写入 AppStorage 由 Index 页消费；未携带参数时为空操作
+   * @param want 拉起应用的意图
+   */
+  private applyQuickAddWant(want: Want): void {
+    const rawQuickAdd: Object | undefined = want.parameters?.['quickAdd'];
+    if (typeof rawQuickAdd === 'boolean' && rawQuickAdd) {
+      AppStorage.setOrCreate<boolean>('pendingQuickAdd', true);
+    }
   }
 
   /** 主窗口创建回调：加载入口页面并设置应用深浅色模式 */

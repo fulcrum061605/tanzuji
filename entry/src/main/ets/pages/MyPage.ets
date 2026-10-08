@@ -443,23 +443,6 @@ export struct MyPage {
   }
 
   /**
-   * 按插图类型映射文章图标资源
-   * @param article 文章数据
-   * @returns 对应的图标资源，未知类型回落到叶片图标
-   */
-  private articleIcon(article: KnowledgeArticle): Resource {
-    switch (article.illustration) {
-      case 'travel': return $r('app.media.diary_transit');
-      case 'electricity': return $r('app.media.diary_electricity');
-      case 'food': return $r('app.media.diary_meal');
-      case 'recycle': return $r('app.media.diary_recycle');
-      case 'campus': return $r('app.media.diary_sprout');
-      case 'policy': return $r('app.media.diary_diary');
-      default: return $r('app.media.diary_leaf');
-    }
-  }
-
-  /**
    * 按插图类型映射文章详情配图资源
    * 与成长页详情共用同一组内置配图；未知类型回落到树苗风景图。
    * @param article 文章数据
@@ -1227,21 +1210,13 @@ export struct MyPage {
 
   /**
    * 单条收藏文章行
-   * 图标 + 标题/分类时长 + 右侧取消收藏按钮；整行点击进入文章详情
+   * 标题/分类时长 + 右侧取消收藏按钮；整行点击进入文章详情
    * @param article 收藏文章数据
    */
   @Builder
   private FavoriteRow(article: KnowledgeArticle) {
     Row({ space: 13 }) {
-      // 左侧：文章图标（圆角浅绿底）
-      Image(this.articleIcon(article))
-        .syncLoad(true)
-        .width(45)
-        .height(45)
-        .padding(6)
-        .backgroundColor('#EAF0E5')
-        .borderRadius(23)
-      // 中部：标题 + 分类与阅读时长，超长省略
+      // 中部：标题 + 分类与阅读时长，超长省略；不再放含义不明的分类图标
       Column({ space: 5 }) {
         Text(article.title)
           .fontSize(17)
@@ -1411,21 +1386,12 @@ export struct MyPage {
             .height(170)
             .borderRadius(14)
             .objectFit(ImageFit.Cover)
-          // 分类与阅读时长信息行
-          Row({ space: 14 }) {
-            Image(this.articleIcon(article))
-              .syncLoad(true)
-              .width(44)
-              .height(44)
-              .padding(6)
-              .backgroundColor('#EAF0E5')
-              .borderRadius(22)
-            Column({ space: 4 }) {
-              Text(article.category).fontSize(13).fontColor('#4C8067')
-              Text(article.readTime).fontSize(12).fontColor('#8A968F')
-            }
-            .alignItems(HorizontalAlign.Start)
+          // 分类与阅读时长信息行：纯文字呈现，与成长页文章详情保持一致
+          Column({ space: 4 }) {
+            Text(article.category).fontSize(13).fontColor('#4C8067')
+            Text(article.readTime).fontSize(12).fontColor('#8A968F')
           }
+          .alignItems(HorizontalAlign.Start)
           .width('100%')
           // 文章大标题
           Text(article.title)
@@ -1595,29 +1561,29 @@ export struct MyPage {
             this.Header()
             this.Profile()
             this.Overview()
-            // 菜单入口：我的收藏（显示收藏数量）
-            this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.diary_leaf'), () => {
+            // 菜单入口：我的收藏（显示收藏数量）；每个入口使用独立手绘图标
+            this.MenuRow('我的收藏', `${this.favoriteIds.length} 篇文章可离线阅读`, $r('app.media.menu_favorite'), () => {
               this.showingFavorites = true;
             })
             // 菜单入口：家庭碳账户（本机添加成员、共用记录与家庭周报，不需要联网）
-            this.MenuRow('家庭碳账户', '与家人共用一本低碳账本，协作完成家庭目标', $r('app.media.diary_person'), () => {
+            this.MenuRow('家庭碳账户', '与家人共用一本低碳账本，协作完成家庭目标', $r('app.media.menu_family'), () => {
               this.onStartFamily?.();
             })
             // 菜单入口：低碳答题（每日最多获得 4 分，作为知识激励）
-            this.MenuRow('低碳答题', '完成每日知识挑战，最高获得 4 积分', $r('app.media.diary_sprout'), () => {
+            this.MenuRow('低碳答题', '完成每日知识挑战，最高获得 4 积分', $r('app.media.menu_quiz'), () => {
               this.onStartQuiz?.();
             })
             // 菜单入口：低碳足迹棋盘（每次消耗 5 积分，权益每周限领一次）
-            this.MenuRow('低碳足迹', '消耗 5 积分随机前进，发现低碳知识与模拟权益', $r('app.media.diary_leaf'), () => {
+            this.MenuRow('低碳足迹', '消耗 5 积分随机前进，发现低碳知识与模拟权益', $r('app.media.menu_footprint'), () => {
               this.onStartFootprintGame?.();
             })
             // 菜单入口：积分与权益（模拟兑换，不连接真实平台）
-            this.MenuRow('积分与权益', '签到、查看积分并兑换模拟低碳权益', $r('app.media.diary_leaf'), () => {
+            this.MenuRow('积分与权益', '签到、查看积分并兑换模拟低碳权益', $r('app.media.menu_rewards'), () => {
               this.showingRewards = true;
             })
             // 菜单入口：数据管理（本机备份/恢复/CSV 报表）；
             // 成长知识库不再单列入口，底部"成长"栏目直达同一页面
-            this.MenuRow('数据管理', '备份、恢复与导出 CSV 报表', $r('app.media.diary_leaf'), () => {
+            this.MenuRow('数据管理', '备份、恢复与导出 CSV 报表', $r('app.media.menu_data'), () => {
               this.showingDataManagement = true;
             })
           }

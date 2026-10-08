@@ -132,6 +132,16 @@ export struct Home {
   @State private searchActive: boolean = false;
   /** 搜索关键字：对日记时间/标题/正文/标签做包含匹配 */
   @State private searchText: string = '';
+  /** 过滤结果缓存：单次渲染会多处读取日记列表，数据未变化时直接复用上次结果 */
+  private filteredCache: DiaryEntry[] | undefined = undefined;
+  /** 过滤缓存键：上次计算时的记录列表引用 */
+  private filteredDraftsRef: RecordDraft[] | undefined = undefined;
+  /** 过滤缓存键：上次计算时的隐藏示例 id 列表引用 */
+  private filteredHiddenRef: string[] | undefined = undefined;
+  /** 过滤缓存键：上次计算时的搜索关键字 */
+  private filteredKeyword: string = '';
+  /** 过滤缓存键：上次计算时的筛选日期 */
+  private filteredDate: number = -1;
 
   /** 组件即将出现：恢复入口传入的选中栏目，并按媒体查询结果判断宽屏布局 */
   aboutToAppear(): void {
@@ -216,28 +226,37 @@ export struct Home {
   /**
    * 获取过滤后的日记列表
    * 先合并"已保存草稿（倒序，最新在前） + 未删除的内置示例"，
-   * 再按关键字对时间/标题/正文/标签做包含匹配
+   * 再按关键字对时间/标题/正文/标签做包含匹配；
+   * 空状态、真实记录与演示记录会各自读取一次列表，这里按
+   * 草稿/隐藏示例引用与搜索条件作缓存键，数据未变化时复用同一份过滤结果
    * @returns 符合搜索条件的日记条目数组
    */
   private filteredEntries(): DiaryEntry[] {
     // 去除关键字首尾空白与内部空格，避免误过滤
     const keyword: string = this.searchText.trim().toLowerCase().replace(/\s/g, '');
+    if (this.filteredCache !== undefined && this.filteredDraftsRef === this.savedDrafts &&
+      this.filteredHiddenRef === this.hiddenExampleIds && this.filteredKeyword === keyword &&
+      this.filteredDate === this.selectedDate) {
+      return this.filteredCache;
+    }
     const dateEntries: DiaryEntry[] = this.combinedEntries().filter((entry: DiaryEntry): boolean => {
       // 没有时间戳的内置演示记录只在今天显示，避免切换历史日期时混入示例。
       return entry.recordedAt === undefined
         ? this.sameDay(Date.now(), this.selectedDate)
         : this.sameDay(entry.recordedAt, this.selectedDate);
     });
-    // 关键字为空：返回当前日期的记录
-    if (keyword.length === 0) {
-      return dateEntries;
-    }
-    // 按可检索字段（时间+标题+正文+标签）做包含匹配
-    return dateEntries.filter((entry: DiaryEntry): boolean => {
+    // 关键字为空：返回当前日期的记录；否则按可检索字段（时间+标题+正文+标签）做包含匹配
+    const result: DiaryEntry[] = keyword.length === 0 ? dateEntries : dateEntries.filter((entry: DiaryEntry): boolean => {
       const searchable: string = `${entry.time}${entry.title}${entry.content}${entry.label}`
         .toLowerCase().replace(/\s/g, '');
       return searchable.includes(keyword);
     });
+    this.filteredCache = result;
+    this.filteredDraftsRef = this.savedDrafts;
+    this.filteredHiddenRef = this.hiddenExampleIds;
+    this.filteredKeyword = keyword;
+    this.filteredDate = this.selectedDate;
+    return result;
   }
 
   /** 将可见列表分成真实记录和内置演示记录，避免两类数据在视觉上混为一谈。 */
@@ -705,10 +724,14 @@ export struct Home {
       // 悬浮"新建日记"圆形按钮：绿色稍浓的玻璃材质 + 柔和投影，突出主要操作
       Button({ type: ButtonType.Circle, stateEffect: false }) {
         // 加号图标保持居中与原尺寸；SVG 本身为近白色，与绿色玻璃底对比清晰
-        Image($r('app.media.diary_plus'))
-          .syncLoad(true)
-          .width(34)
-          .height(34)
+        Stack({ alignContent: Alignment.Center }) {
+          Image($r('app.media.diary_plus'))
+            .syncLoad(true)
+            .width(34)
+            .height(34)
+        }
+        .width(34)
+        .height(34)
       }
       .width(66)
       .height(66)

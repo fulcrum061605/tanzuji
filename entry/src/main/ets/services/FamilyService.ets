@@ -513,11 +513,15 @@ export class FamilyService {
     const admin: FamilyMember | undefined =
       family.members.find((item: FamilyMember): boolean => item.role === 'admin');
     const adminId: string = admin !== undefined ? admin.memberId : '';
+    // 现存成员 id 集合：归属判断随每条记录高频调用，用 Set 命中代替数组成员扫描
+    const memberIds: Set<string> = new Set<string>();
+    family.members.forEach((item: FamilyMember): void => {
+      memberIds.add(item.memberId);
+    });
     // 记录归属：按 memberId 匹配现存成员；未归属的历史记录归管理员；已删除成员返回空串跳过
     const ownerIdOf = (draft: RecordDraft): string => {
       if (draft.memberId !== undefined && draft.memberId.length > 0) {
-        return family.members.some((item: FamilyMember): boolean => item.memberId === draft.memberId)
-          ? draft.memberId : '';
+        return memberIds.has(draft.memberId) ? draft.memberId : '';
       }
       return adminId;
     };
